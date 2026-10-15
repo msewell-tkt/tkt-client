@@ -8,7 +8,7 @@ import Message from 'primevue/message'
 import MultiSelect from 'primevue/multiselect'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
-import { auth } from '../auth'
+import AppHeader from '../components/AppHeader.vue'
 import { permissionOptions, propertyOptions, userRoles, users, userStatuses, type UserRecord, type UserStatus } from '../data/users'
 
 const route = useRoute()
@@ -19,7 +19,7 @@ const saved = ref(false)
 const form = ref<UserRecord>(emptyUser())
 
 function emptyUser(): UserRecord {
-  return { id: 0, name: '', email: '', phone: '', role: 'Coordinator', status: 'Invited', title: '', initials: '', color: '#5962d8', lastActive: 'Invite pending', joined: new Date().toISOString().slice(0, 10), properties: [], permissions: ['Manage work orders'], activity: [] }
+  return { id: 0, name: '', email: '', phone: '', role: 'Technician', status: 'Invited', title: '', initials: '', color: '#5962d8', lastActive: 'Invite pending', joined: new Date().toISOString().slice(0, 10), properties: [], permissions: ['Manage work orders'], activity: [] }
 }
 
 watch(existing, (value) => { form.value = value ? JSON.parse(JSON.stringify(value)) : emptyUser() }, { immediate: true })
@@ -53,20 +53,11 @@ function deactivate() {
   form.value.status = form.value.status === 'Inactive' ? 'Active' : 'Inactive'
   saveUser()
 }
-
-async function signOut() {
-  await auth.logout()
-  await router.replace({ name: 'login' })
-}
 </script>
 
 <template>
   <div class="min-h-screen bg-[#f5f7fb]">
-    <header class="sticky top-0 z-10 flex h-[68px] items-center justify-between border-b border-[#e4e7ee] bg-white/90 px-[clamp(1rem,4vw,3.5rem)] backdrop-blur-2xl">
-      <RouterLink class="flex items-center gap-3 font-extrabold tracking-[-.02em]" to="/"><span class="grid h-8 w-8 place-items-center rounded-[.6rem] bg-[#6972ea] text-[.8rem] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></span><span>Turnkey Tracker</span></RouterLink>
-      <nav class="mr-auto ml-10 flex self-stretch items-stretch gap-1 max-[800px]:hidden [&_a]:flex [&_a]:items-center [&_a]:border-b-2 [&_a]:border-transparent [&_a]:px-[.8rem] [&_a]:text-[.88rem] [&_a]:font-semibold [&_a]:text-[#667085]" aria-label="Primary navigation"><RouterLink to="/scheduler">Scheduler</RouterLink><RouterLink to="/properties">Properties</RouterLink><RouterLink to="/work-orders">Work orders</RouterLink><RouterLink class="!border-b-[#5962d8] !text-[#5962d8]" to="/users">Users</RouterLink></nav>
-      <Button icon="pi pi-sign-out" label="Sign out" severity="secondary" text class="max-[520px]:[&_.p-button-label]:hidden" @click="signOut" />
-    </header>
+    <AppHeader />
 
     <main class="mx-auto w-[min(1180px,calc(100%-2rem))] py-[clamp(1.5rem,4vw,3rem)] max-[560px]:w-[calc(100%-1.25rem)]">
       <template v-if="notFound">

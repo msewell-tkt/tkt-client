@@ -1,6 +1,8 @@
 export interface ApiAuthentication {
   getAccessToken(): string | null
   refresh(): Promise<boolean>
+  /** Called when a protected request is still unauthorized after a refresh attempt. */
+  onSessionExpired?(): void
 }
 
 export interface RequestOptions {
@@ -31,6 +33,12 @@ export abstract class BaseApiService {
 
   protected async json<T>(response: Response): Promise<T> {
     return response.json() as Promise<T>
+  }
+
+  /** Parses a JSON body, or throws an Error carrying the API's message. */
+  protected async data<T>(response: Response, fallback: string): Promise<T> {
+    if (!response.ok) throw new Error(await this.errorMessage(response, fallback))
+    return this.json<T>(response)
   }
 
   protected async errorMessage(response: Response, fallback: string): Promise<string> {
@@ -67,6 +75,7 @@ export abstract class BaseApiService {
       if (await this.authentication.refresh()) {
         return this.request(path, init, { ...options, retryUnauthorized: false })
       }
+      this.authentication.onSessionExpired?.()
     }
     return response
   }

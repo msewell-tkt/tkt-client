@@ -1,19 +1,19 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
-import { auth } from '../auth'
-import { users, type UserRole, type UserStatus } from '../data/users'
+import AppHeader from '../components/AppHeader.vue'
+import { userRoles, userStatuses, users, type UserRole, type UserStatus } from '../data/users'
 
 const router = useRouter()
 const search = ref('')
 const roleFilter = ref<'All roles' | UserRole>('All roles')
 const statusFilter = ref<'All statuses' | UserStatus>('All statuses')
-const roles: Array<'All roles' | UserRole> = ['All roles', 'Admin', 'QA', 'Property', 'Technician']
-const statuses: Array<'All statuses' | UserStatus> = ['All statuses', 'Active', 'Invited', 'Inactive']
+const roles: Array<'All roles' | UserRole> = ['All roles', ...userRoles]
+const statuses: Array<'All statuses' | UserStatus> = ['All statuses', ...userStatuses]
 
 const filteredUsers = computed(() => {
   const term = search.value.trim().toLowerCase()
@@ -32,25 +32,11 @@ const adminCount = computed(() => users.value.filter((user) => user.role === 'Ad
 function statusSeverity(status: UserStatus) {
   return status === 'Active' ? 'success' : status === 'Invited' ? 'warn' : 'secondary'
 }
-
-async function signOut() {
-  await auth.logout()
-  await router.replace({ name: 'login' })
-}
 </script>
 
 <template>
   <div class="min-h-screen bg-[#f5f7fb]">
-    <header class="sticky top-0 z-10 flex h-[68px] items-center justify-between border-b border-[#e4e7ee] bg-white/90 px-[clamp(1rem,4vw,3.5rem)] backdrop-blur-2xl">
-      <RouterLink class="flex items-center gap-3 font-extrabold tracking-[-.02em]" to="/">
-        <span class="grid h-8 w-8 place-items-center rounded-[.6rem] bg-[#6972ea] text-[.8rem] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></span>
-        <span>Turnkey Tracker</span>
-      </RouterLink>
-      <nav class="mr-auto ml-10 flex self-stretch items-stretch gap-1 max-[800px]:hidden [&_a]:flex [&_a]:items-center [&_a]:border-b-2 [&_a]:border-transparent [&_a]:px-[.8rem] [&_a]:text-[.88rem] [&_a]:font-semibold [&_a]:text-[#667085] [&_a:hover]:text-[#313a51]" aria-label="Primary navigation">
-        <RouterLink to="/scheduler">Scheduler</RouterLink><RouterLink to="/properties">Properties</RouterLink><RouterLink to="/work-orders">Work orders</RouterLink><RouterLink class="!border-b-[#5962d8] !text-[#5962d8]" to="/users">Users</RouterLink>
-      </nav>
-      <Button icon="pi pi-sign-out" label="Sign out" severity="secondary" text class="max-[520px]:[&_.p-button-label]:hidden" @click="signOut" />
-    </header>
+    <AppHeader />
 
     <main class="mx-auto w-[min(1320px,calc(100%-2rem))] py-[clamp(1.5rem,4vw,3rem)] max-[560px]:w-[calc(100%-1.25rem)]">
       <section class="mb-7 flex items-end justify-between gap-6">

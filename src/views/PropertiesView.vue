@@ -1,43 +1,51 @@
 <script setup lang="ts">
-import {computed, onMounted, ref} from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
 import Dialog from 'primevue/dialog'
 import Drawer from 'primevue/drawer'
+import InputNumber from 'primevue/inputnumber'
 import InputText from 'primevue/inputtext'
+import Message from 'primevue/message'
+import ProgressSpinner from 'primevue/progressspinner'
 import Select from 'primevue/select'
 import Textarea from 'primevue/textarea'
 import ToggleSwitch from 'primevue/toggleswitch'
-import { auth } from '../auth'
+import AppHeader from '../components/AppHeader.vue'
 import {
+  propertyService,
   type Contact,
-  type Image,
   type Property,
+  type PropertyResource,
   type PropertyView,
-  type ServiceItem, type Session,
-  sessionService
-} from "../services/SessionService.ts";
-import ProgressSpinner from "primevue/progressspinner";
+  type ServiceItem,
+} from '../services/PropertyService'
 
 type EditorTab = 'info' | 'contacts' | 'services' | 'images'
 
-const router = useRouter()
 const search = ref('')
 const showArchived = ref(false)
 const sortDirection = ref<'asc' | 'desc'>('asc')
 const editorOpen = ref(false)
 const activeTab = ref<EditorTab>('info')
 const editing = ref<Property | null>(null)
-const deleteOpen = ref(false)
+const archiveOpen = ref(false)
 const savedNotice = ref(false)
+const saving = ref(false)
 const saveError = ref('')
 const loading = ref(true)
 const loadError = ref('')
 const propertyView = ref<PropertyView | null>(null)
-const contacts = ref<Contact[] | null>(null);
-const services = ref<ServiceItem[] | null>(null);
-const images = ref<Image[] | null>(null);
+const properties = ref<Property[]>([])
+
+// Sub-resources of the property open in the editor, loaded from the API when it opens.
+const contacts = ref<Contact[]>([])
+const services = ref<ServiceItem[]>([])
+const images = ref<PropertyResource[]>([])
+const detailsLoading = ref(false)
+const detailsError = ref('')
+const rowSaving = ref<string | null>(null)
+const newImageUrl = ref('')
 
 const states = ['Alabama', 'Florida', 'Georgia', 'North Carolina', 'South Carolina', 'Tennessee']
 const tabs: Array<{ value: EditorTab; label: string; icon: string }> = [
@@ -47,137 +55,219 @@ const tabs: Array<{ value: EditorTab; label: string; icon: string }> = [
   { value: 'images', label: 'Images', icon: 'pi pi-images' },
 ]
 
-const serviceDefaults = [
-  { id: 1, name: 'Full paint', detail: 'Walls, trim, doors, and ceilings', enabled: true },
-  { id: 2, name: 'Paint touch-up', detail: 'Spot repair and color matching', enabled: true },
-  { id: 3, name: 'Drywall repair', detail: 'Patch, sand, prime, and paint', enabled: false },
-  { id: 4, name: 'Turn cleaning', detail: 'Move-out and make-ready cleaning', enabled: true },
-]
-
-const properties = ref<Property[]>([]);
-
 const filteredProperties = computed(() => {
   const term = search.value.trim().toLowerCase()
-  return (properties.value ?? [])
+  return properties.value
     .filter((item) => showArchived.value || item.archived !== true)
     .filter((item) => !term || `${item.name} ${item.address1} ${item.city} ${item.postalCode}`.toLowerCase().includes(term))
     .sort((a, b) => a.name.localeCompare(b.name) * (sortDirection.value === 'asc' ? 1 : -1))
 })
 
+function message(reason: unknown, fallback: string): string {
+  return reason instanceof Error && reason.message ? reason.message : fallback
+}
+
+function contactName(contact: Contact | null | undefined): string {
+  if (!contact) return ''
+  return [contact.firstName, contact.lastName].filter(Boolean).join(' ') || contact.email || ''
+}
+
 function cloneProperty(item: Property): Property {
   return JSON.parse(JSON.stringify(item)) as Property
 }
 
-function openProperty(item: Property) {
-  editing.value = cloneProperty(item)
+function flashSaved() {
+  savedNotice.value = true
+  window.setTimeout(() => { savedNotice.value = false }, 2500)
+}
+
+function startEditing(property: Property) {
+  editing.value = property
   activeTab.value = 'info'
   savedNotice.value = false
   saveError.value = ''
+  detailsError.value = ''
+  contacts.value = []
+  services.value = []
+  images.value = []
+  newImageUrl.value = ''
   editorOpen.value = true
+}
+
+async function openProperty(item: Property) {
+  startEditing(cloneProperty(item))
+  if (item.id) await loadDetails(item.id)
 }
 
 function addProperty() {
-  editing.value = {
+  startEditing({
     id: null, name: '', description: '', address1: '', address2: '', city: '', state: 'Georgia',
-    postalCode: '', phone: '', requiresApproval: false, securityCode: '', image: '', archived: false,
-  }
-  activeTab.value = 'info'
-  savedNotice.value = false
-  saveError.value = ''
-  editorOpen.value = true
+    postalCode: '', phone: '', requiresApproval: false, securityCode: '', primaryContact: null, image: '', archived: false,
+  })
 }
 
-async function saveProperty() {
-  if (!editing.value?.name?.trim()) return
+async function loadDetails(propertyId: string) {
+  detailsLoading.value = true
+  detailsError.value = ''
+  try {
+    const [loadedContacts, loadedServices, loadedImages] = await Promise.all([
+      propertyService.contacts(propertyId),
+      propertyService.serviceItems(propertyId),
+      propertyService.resources(propertyId),
+    ])
+    if (editing.value?.id !== propertyId) return
+    contacts.value = loadedContacts
+    services.value = loadedServices
+    images.value = loadedImages
+  } catch (reason) {
+    detailsError.value = message(reason, 'Couldn’t load property details.')
+  } finally {
+    detailsLoading.value = false
+  }
+}
+
+function upsertProperty(saved: Property) {
+  const index = properties.value.findIndex((item) => item.id === saved.id)
+  if (index >= 0) properties.value[index] = saved
+  else properties.value.push(saved)
+}
+
+async function saveProperty(): Promise<boolean> {
+  if (!editing.value?.name?.trim()) return false
+  saving.value = true
   saveError.value = ''
   try {
-    const response = await sessionService.updateProperty(editing.value)
-    if (response.status === 401) {
-      await router.replace({ name: 'login' })
-      return
-    }
-    if (!response.ok) {
-      const body = await response.text()
-      saveError.value = body || `Unable to save property (HTTP ${response.status}).`
-      return
-    }
-
-    const saved = await response.json() as Property
-    editing.value = saved
-    const existingIndex = properties.value.findIndex((item) => item.id === saved.id)
-    if (existingIndex >= 0) properties.value[existingIndex] = saved
-    else properties.value.push(saved)
-    savedNotice.value = true
-    window.setTimeout(() => { savedNotice.value = false }, 2500)
+    const saved = await propertyService.save(editing.value)
+    editing.value = cloneProperty(saved)
+    upsertProperty(saved)
+    flashSaved()
+    return true
   } catch (reason) {
-    saveError.value = reason instanceof Error ? reason.message : 'Unable to save property.'
+    saveError.value = message(reason, 'Unable to save property.')
+    return false
+  } finally {
+    saving.value = false
   }
 }
 
+// Contacts
+
 function addContact() {
-  if (!editing.value) return
-  //editing.value.contacts.push({ id: Date.now(), name: '', role: '', email: '', phone: '', primary: editing.value.contacts.length === 0 })
+  contacts.value.push({ id: null, email: '', firstName: '', lastName: '', phone: '' })
 }
 
-function removeContact(id: string) {
-  if (!editing.value) return
-  //editing.value.contacts = editing.value.contacts.filter((contact) => contact.id !== id)
+async function saveContact(index: number) {
+  const propertyId = editing.value?.id
+  const contact = contacts.value[index]
+  if (!propertyId || !contact) return
+  if (!contact.email.trim()) {
+    saveError.value = 'A contact needs an email address.'
+    return
+  }
+  rowSaving.value = `contact-${index}`
+  saveError.value = ''
+  try {
+    contacts.value[index] = await propertyService.saveContact(propertyId, contact)
+    flashSaved()
+  } catch (reason) {
+    saveError.value = message(reason, 'Unable to save the contact.')
+  } finally {
+    rowSaving.value = null
+  }
 }
 
-function selectPrimaryContact(id: string) {
-  if (!editing.value) return
-  //editing.value.contacts.forEach((contact) => { contact.primary = contact.id === id })
+function isPrimaryContact(contact: Contact): boolean {
+  return Boolean(contact.id) && editing.value?.primaryContact?.id === contact.id
 }
 
-function handleImages(event: Event) {
-  if (!editing.value) return
-  const input = event.target as HTMLInputElement
-  Array.from(input.files ?? []).forEach((file) => {
-    //editing.value?.images.push({ id: Date.now() + Math.random(), name: file.name, url: URL.createObjectURL(file), primary: editing.value.images.length === 0 })
-  })
-  input.value = ''
+async function makePrimaryContact(contact: Contact) {
+  if (!editing.value || !contact.id || isPrimaryContact(contact)) return
+  const previous = editing.value.primaryContact
+  editing.value.primaryContact = contact
+  if (!await saveProperty() && editing.value) editing.value.primaryContact = previous
 }
 
-function removeImage(id: string) {
-  if (!editing.value) return
-  // const image = editing.value.images.find((item) => item.id === id)
-  // editing.value.images = editing.value.images.filter((item) => item.id !== id)
-  // if (image?.primary && editing.value.images[0]) editing.value.images[0].primary = true
+// Service items
+
+function addServiceItem() {
+  services.value.push({ id: null, name: '', cost: null, list: null, extra: false })
 }
 
-function setPrimaryImage(id: string) {
-  if (!editing.value) return
-  //editing.value.images.forEach((item) => { item.primary = item.id === id })
+async function saveServiceItem(index: number) {
+  const propertyId = editing.value?.id
+  const item = services.value[index]
+  if (!propertyId || !item) return
+  if (!item.name.trim()) {
+    saveError.value = 'A service item needs a name.'
+    return
+  }
+  rowSaving.value = `service-${index}`
+  saveError.value = ''
+  try {
+    services.value[index] = await propertyService.saveServiceItem(propertyId, item)
+    flashSaved()
+  } catch (reason) {
+    saveError.value = message(reason, 'Unable to save the service item.')
+  } finally {
+    rowSaving.value = null
+  }
 }
 
-function confirmDelete() {
-  if (!editing.value) return
-  properties.value = properties.value.filter((item) => item.id !== editing.value?.id)
-  deleteOpen.value = false
-  editorOpen.value = false
+// Images (property resources holding an image URL)
+
+function isImageUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' || url.protocol === 'http:'
+  } catch {
+    return false
+  }
 }
 
-async function signOut() {
-  await auth.logout()
-  await router.replace({ name: 'login' })
+async function addImage() {
+  const propertyId = editing.value?.id
+  const url = newImageUrl.value.trim()
+  if (!propertyId || !url) return
+  if (!isImageUrl(url)) {
+    saveError.value = 'Enter a full image URL starting with https://.'
+    return
+  }
+  rowSaving.value = 'image'
+  saveError.value = ''
+  try {
+    images.value.push(await propertyService.saveResource(propertyId, { id: null, resource: url }))
+    newImageUrl.value = ''
+    flashSaved()
+  } catch (reason) {
+    saveError.value = message(reason, 'Unable to save the image.')
+  } finally {
+    rowSaving.value = null
+  }
+}
+
+async function setPrimaryImage(resource: PropertyResource) {
+  if (!editing.value || editing.value.image === resource.resource) return
+  const previous = editing.value.image
+  editing.value.image = resource.resource
+  if (!await saveProperty() && editing.value) editing.value.image = previous
+}
+
+// Archiving (the API has no delete endpoint; archived properties are hidden from the active list)
+
+async function confirmArchive() {
+  if (!editing.value) return
+  editing.value.archived = true
+  archiveOpen.value = false
+  if (await saveProperty()) editorOpen.value = false
+  else if (editing.value) editing.value.archived = false
 }
 
 onMounted(async () => {
   try {
-    const response = await sessionService.getProperties()
-    if (response.ok) {
-      const payload = await response.json() as Partial<PropertyView> | null
-      propertyView.value = {
-        properties: Array.isArray(payload?.properties) ? payload.properties : [],
-        activeProperties: payload?.activeProperties ?? 0,
-        propertyContacts: payload?.propertyContacts ?? 0,
-      }
-      properties.value = propertyView.value.properties
-    }
-    else if (response.status === 401) await router.replace({ name: 'login' })
-    else loadError.value = `Couldn't load properties (HTTP ${response.status}).`
-  } catch {
-    loadError.value = 'Couldn’t load properties. Check that the API is running and try again.'
+    propertyView.value = await propertyService.list()
+    properties.value = propertyView.value.properties
+  } catch (reason) {
+    loadError.value = message(reason, 'Couldn’t load properties. Check that the API is running and try again.')
   } finally {
     loading.value = false
   }
@@ -186,25 +276,14 @@ onMounted(async () => {
 
 <template>
   <div class="min-h-screen bg-[#f5f7fb]">
-    <header class="sticky top-0 z-10 flex h-[68px] items-center justify-between border-b border-[#e4e7ee] bg-white/90 px-[clamp(1rem,4vw,3.5rem)] backdrop-blur-2xl">
-      <RouterLink class="flex items-center gap-3 font-extrabold tracking-[-.02em]" to="/">
-        <span class="grid h-8 w-8 place-items-center rounded-[.6rem] bg-[#6972ea] text-[.8rem] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></span>
-        <span>Turnkey Tracker</span>
-      </RouterLink>
-      <nav class="mr-auto ml-10 flex self-stretch items-stretch gap-1 max-[800px]:hidden [&_a]:flex [&_a]:items-center [&_a]:border-b-2 [&_a]:border-transparent [&_a]:px-[.8rem] [&_a]:text-[.88rem] [&_a]:font-semibold [&_a]:text-[#667085] [&_a:hover]:text-[#313a51]" aria-label="Primary navigation">
-        <RouterLink to="/scheduler">Scheduler</RouterLink>
-        <RouterLink class="!border-b-[#5962d8] !text-[#5962d8]" to="/properties">Properties</RouterLink>
-        <RouterLink to="/work-orders">Work orders</RouterLink><RouterLink to="/users">Users</RouterLink>
-      </nav>
-      <Button icon="pi pi-sign-out" label="Sign out" severity="secondary" text class="max-[520px]:[&_.p-button-label]:hidden" @click="signOut" />
-    </header>
+    <AppHeader />
 
     <main class="mx-auto w-[min(1440px,calc(100%-2rem))] py-[clamp(1.5rem,4vw,3rem)] max-[560px]:w-[calc(100%-1.25rem)]">
       <section v-if="loading" class="grid min-h-[50vh] content-center justify-items-center gap-4 text-[#697386]">
         <ProgressSpinner stroke-width="4" />
         <p>Loading your workspace…</p>
       </section>
-      <section v-if="loadError" class="mb-5 rounded-xl border border-[#f0c7c7] bg-[#fff7f7] px-4 py-3 text-sm text-[#9c3f3f]" role="alert">
+      <section v-else-if="loadError" class="mb-5 rounded-xl border border-[#f0c7c7] bg-[#fff7f7] px-4 py-3 text-sm text-[#9c3f3f]" role="alert">
         {{ loadError }}
       </section>
       <section class="mb-7 flex items-end justify-between gap-6 max-[680px]:items-start">
@@ -239,17 +318,17 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div class="grid grid-cols-[minmax(260px,1.4fr)_minmax(320px,1fr)_120px_52px] border-b border-[#e8ebf1] bg-[#fafbfc] px-5 py-3 text-[.7rem] font-extrabold tracking-[.08em] text-[#80899a] uppercase max-[800px]:hidden">
-          <span>Property</span><span>Location</span><span>Contacts</span><span></span>
+        <div class="grid grid-cols-[minmax(260px,1.4fr)_minmax(320px,1fr)_180px_52px] border-b border-[#e8ebf1] bg-[#fafbfc] px-5 py-3 text-[.7rem] font-extrabold tracking-[.08em] text-[#80899a] uppercase max-[800px]:hidden">
+          <span>Property</span><span>Location</span><span>Primary contact</span><span></span>
         </div>
         <div v-if="filteredProperties.length">
-          <button v-for="item in filteredProperties" :key="item.id" type="button" class="group grid w-full grid-cols-[minmax(260px,1.4fr)_minmax(320px,1fr)_120px_52px] items-center border-0 border-b border-[#edf0f4] bg-white px-5 py-4 text-left text-inherit last:border-b-0 hover:bg-[#fafbff] max-[800px]:grid-cols-[1fr_auto] max-[800px]:gap-3" @click="openProperty(item)">
+          <button v-for="item in filteredProperties" :key="item.id ?? item.name" type="button" class="group grid w-full grid-cols-[minmax(260px,1.4fr)_minmax(320px,1fr)_180px_52px] items-center border-0 border-b border-[#edf0f4] bg-white px-5 py-4 text-left text-inherit last:border-b-0 hover:bg-[#fafbff] max-[800px]:grid-cols-[1fr_auto] max-[800px]:gap-3" @click="openProperty(item)">
             <span class="flex min-w-0 items-center gap-3.5">
               <span class="grid h-12 w-12 shrink-0 place-items-center overflow-hidden rounded-xl border border-black/5 bg-[#eef0ff] text-[#667085]"><i class="pi pi-building text-lg" /></span>
-              <span class="min-w-0"><strong class="block overflow-hidden text-[.94rem] text-ellipsis whitespace-nowrap text-[#293246]">{{ item.name }}</strong><small class="mt-1 flex items-center gap-1.5 text-[#858ea0]"><i :class="['pi text-[.65rem]', item.archived ? 'pi-archive' : 'pi-circle-fill text-[#25a582]']" /></small></span>
+              <span class="min-w-0"><strong class="block overflow-hidden text-[.94rem] text-ellipsis whitespace-nowrap text-[#293246]">{{ item.name }}</strong><small class="mt-1 flex items-center gap-1.5 text-[#858ea0]"><i :class="['pi text-[.65rem]', item.archived ? 'pi-archive' : 'pi-circle-fill text-[#25a582]']" />{{ item.archived ? 'Archived' : 'Active' }}</small></span>
             </span>
             <span class="min-w-0 max-[800px]:col-start-1 max-[800px]:ml-[3.4rem] max-[800px]:-mt-4"><span class="block overflow-hidden text-[.86rem] text-ellipsis whitespace-nowrap text-[#4e586d]">{{ item.address1 }}</span><small class="mt-1 block text-[#8b93a3]">{{ item.city }}, {{ item.state }} {{ item.postalCode }}</small></span>
-            <span class="text-[.84rem] font-semibold text-[#5f687c] max-[800px]:hidden" v-if="contacts"><i class="pi pi-users mr-2 text-xs text-[#8e96a6]" />{{ contacts.length }}</span>
+            <span class="min-w-0 overflow-hidden text-[.84rem] font-semibold text-ellipsis whitespace-nowrap text-[#5f687c] max-[800px]:hidden"><i class="pi pi-user mr-2 text-xs text-[#8e96a6]" />{{ contactName(item.primaryContact) || '—' }}</span>
             <span class="grid h-8 w-8 place-items-center rounded-full text-[#a1a8b5] group-hover:bg-[#eceeff] group-hover:text-[#5962d8]"><i class="pi pi-chevron-right text-xs" /></span>
           </button>
         </div>
@@ -267,7 +346,7 @@ onMounted(async () => {
             <Button icon="pi pi-times" severity="secondary" text rounded aria-label="Close property editor" @click="editorOpen = false" />
           </div>
           <nav class="flex gap-1 overflow-x-auto px-6 max-[520px]:px-4" aria-label="Property sections">
-            <button v-for="tab in tabs" :key="tab.value" type="button" :class="['flex shrink-0 items-center gap-2 border-0 border-b-2 bg-transparent px-3 py-3 text-[.82rem] font-bold', activeTab === tab.value ? 'border-[#5962d8] text-[#5962d8]' : 'border-transparent text-[#7a8395] hover:text-[#3d465a]']" @click="activeTab = tab.value"><i :class="tab.icon" />{{ tab.label }}</button>
+            <button v-for="tab in tabs" :key="tab.value" type="button" :disabled="!editing.id && tab.value !== 'info'" :title="!editing.id && tab.value !== 'info' ? 'Save the property first' : undefined" :class="['flex shrink-0 items-center gap-2 border-0 border-b-2 bg-transparent px-3 py-3 text-[.82rem] font-bold disabled:cursor-not-allowed disabled:opacity-40', activeTab === tab.value ? 'border-[#5962d8] text-[#5962d8]' : 'border-transparent text-[#7a8395] hover:text-[#3d465a]']" @click="activeTab = tab.value"><i :class="tab.icon" />{{ tab.label }}</button>
           </nav>
         </div>
 
@@ -287,46 +366,70 @@ onMounted(async () => {
             </div>
           </section>
 
-          <section v-else-if="activeTab === 'contacts'">
-            <div class="mb-5 flex items-center justify-between gap-4"><div><h3 class="m-0 text-lg tracking-[-.02em]">Property contacts</h3><p class="mt-1 mb-0 text-sm text-[#7c8597]">People your team may need on-site.</p></div><Button type="button" icon="pi pi-plus" label="Add contact" size="small" outlined @click="addContact" /></div>
-            <div v-if="contacts && contacts.length" class="grid gap-3">
-              <article v-for="contact in contacts" :key="contact.id" class="rounded-xl border border-[#e2e6ed] p-4">
-                <div class="mb-4 flex items-center justify-between"><button type="button" class="flex items-center gap-2 border-0 bg-transparent p-0 text-xs font-bold text-[#667085]" @click="selectPrimaryContact(contact.id)"><i :class="['pi', contact.primary ? 'pi-star-fill text-[#e5a527]' : 'pi-star text-[#9da5b2]']" /> {{ contact.primary ? 'Primary contact' : 'Make primary' }}</button><Button type="button" icon="pi pi-trash" severity="danger" text rounded size="small" aria-label="Remove contact" @click="removeContact(contact.id)" /></div>
-                <div class="grid grid-cols-2 gap-3 max-[560px]:grid-cols-1 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-[.75rem] [&_label]:font-bold [&_label]:text-[#5b6476] [&_.p-inputtext]:w-full"><label>Name<InputText v-model="contact.name" /></label><label>Email<InputText v-model="contact.email" type="email" /></label><label>Phone<InputText v-model="contact.phone" type="tel" /></label></div>
-              </article>
-            </div>
-            <div v-else class="grid min-h-60 place-items-center rounded-xl border border-dashed border-[#d8dde7] text-center"><div><i class="pi pi-users text-2xl text-[#9ba3b1]" /><strong class="mt-3 block">No contacts yet</strong><p class="mt-1 text-sm text-[#838c9d]">Add a manager or leasing office contact.</p></div></div>
-          </section>
+          <template v-else>
+            <div v-if="detailsLoading" class="mb-5 flex items-center gap-3 text-sm text-[#697386]"><ProgressSpinner class="!h-5 !w-5" stroke-width="6" /> Loading property details…</div>
+            <Message v-if="detailsError" severity="error" :closable="false" class="mb-5">{{ detailsError }}</Message>
 
-          <section v-else-if="activeTab === 'services'">
-            <div class="mb-5"><h3 class="m-0 text-lg tracking-[-.02em]">Available services</h3><p class="mt-1 mb-0 text-sm text-[#7c8597]">Choose the work types offered at this property.</p></div>
-            <div class="grid gap-3">
-              <label v-for="service in services" :key="service.id" class="flex cursor-pointer items-center gap-4 rounded-xl border border-[#e2e6ed] px-4 py-4 hover:bg-[#fafbff]"><Checkbox v-model="service.enabled" binary /><span class="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#eef0ff] text-[#5962d8]"><i class="pi pi-wrench" /></span><span><strong class="block text-[.88rem]">{{ service.name }}</strong><small class="mt-1 block text-[#858e9f]">{{ service.detail }}</small></span></label>
-            </div>
-          </section>
+            <section v-if="activeTab === 'contacts'">
+              <div class="mb-5 flex items-center justify-between gap-4"><div><h3 class="m-0 text-lg tracking-[-.02em]">Property contacts</h3><p class="mt-1 mb-0 text-sm text-[#7c8597]">People your team may need on-site.</p></div><Button type="button" icon="pi pi-plus" label="Add contact" size="small" outlined @click="addContact" /></div>
+              <div v-if="contacts.length" class="grid gap-3">
+                <article v-for="(contact, index) in contacts" :key="contact.id ?? `new-contact-${index}`" class="rounded-xl border border-[#e2e6ed] p-4">
+                  <div class="mb-4 flex items-center justify-between gap-3">
+                    <button type="button" :disabled="!contact.id || saving" class="flex items-center gap-2 border-0 bg-transparent p-0 text-xs font-bold text-[#667085] disabled:cursor-default" @click="makePrimaryContact(contact)"><i :class="['pi', isPrimaryContact(contact) ? 'pi-star-fill text-[#e5a527]' : 'pi-star text-[#9da5b2]']" /> {{ isPrimaryContact(contact) ? 'Primary contact' : contact.id ? 'Make primary' : 'New contact' }}</button>
+                    <Button v-if="!contact.id" type="button" icon="pi pi-times" severity="secondary" text rounded size="small" aria-label="Discard new contact" @click="contacts.splice(index, 1)" />
+                  </div>
+                  <div class="grid grid-cols-2 gap-3 max-[560px]:grid-cols-1 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-[.75rem] [&_label]:font-bold [&_label]:text-[#5b6476] [&_.p-inputtext]:w-full"><label>First name<InputText v-model="contact.firstName" /></label><label>Last name<InputText v-model="contact.lastName" /></label><label>Email<InputText v-model="contact.email" type="email" /></label><label>Phone<InputText v-model="contact.phone" type="tel" /></label></div>
+                  <div class="mt-4 flex justify-end"><Button type="button" icon="pi pi-check" :label="contact.id ? 'Save contact' : 'Add contact'" size="small" outlined :loading="rowSaving === `contact-${index}`" @click="saveContact(index)" /></div>
+                </article>
+              </div>
+              <div v-else-if="!detailsLoading" class="grid min-h-60 place-items-center rounded-xl border border-dashed border-[#d8dde7] text-center"><div><i class="pi pi-users text-2xl text-[#9ba3b1]" /><strong class="mt-3 block">No contacts yet</strong><p class="mt-1 text-sm text-[#838c9d]">Add a manager or leasing office contact.</p></div></div>
+            </section>
 
-          <section v-else>
-            <div class="mb-5"><h3 class="m-0 text-lg tracking-[-.02em]">Property images</h3><p class="mt-1 mb-0 text-sm text-[#7c8597]">Add reference photos for dispatchers and field teams.</p></div>
-            <label class="mb-5 grid cursor-pointer place-items-center rounded-xl border-2 border-dashed border-[#d6dbe6] bg-[#fafbfc] px-5 py-8 text-center hover:border-[#9ca3ed] hover:bg-[#f8f8ff]"><input class="hidden" type="file" accept="image/*" multiple @change="handleImages"><span class="grid h-11 w-11 place-items-center rounded-full bg-[#eceeff] text-[#5962d8]"><i class="pi pi-upload" /></span><strong class="mt-3 text-sm">Choose images to upload</strong><small class="mt-1 text-[#858e9f]">PNG, JPG, or WEBP</small></label>
-            <div v-if="images && images.length" class="grid grid-cols-2 gap-3 max-[500px]:grid-cols-1">
-              <article v-for="item in images" :key="item.id" class="overflow-hidden rounded-xl border border-[#e1e5ec] bg-white"><img :src="item.url" :alt="item.name" class="h-40 w-full object-cover"><div class="flex items-center gap-2 p-3"><button type="button" class="min-w-0 flex-1 overflow-hidden border-0 bg-transparent p-0 text-left text-xs font-semibold text-ellipsis whitespace-nowrap" @click="setPrimaryImage(item.id)"><i :class="['pi mr-1.5', item.primary ? 'pi-star-fill text-[#e5a527]' : 'pi-star text-[#9da5b2]']" />{{ item.primary ? 'Primary image' : item.name }}</button><Button type="button" icon="pi pi-trash" severity="danger" text rounded size="small" @click="removeImage(item.id)" /></div></article>
-            </div>
-          </section>
+            <section v-else-if="activeTab === 'services'">
+              <div class="mb-5 flex items-center justify-between gap-4"><div><h3 class="m-0 text-lg tracking-[-.02em]">Service items</h3><p class="mt-1 mb-0 text-sm text-[#7c8597]">Work types offered at this property, with cost and list price.</p></div><Button type="button" icon="pi pi-plus" label="Add item" size="small" outlined @click="addServiceItem" /></div>
+              <div v-if="services.length" class="grid gap-3">
+                <article v-for="(service, index) in services" :key="service.id ?? `new-service-${index}`" class="rounded-xl border border-[#e2e6ed] p-4">
+                  <div class="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 max-[620px]:grid-cols-1 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-[.75rem] [&_label]:font-bold [&_label]:text-[#5b6476] [&_.p-inputtext]:w-full [&_.p-inputnumber]:w-full">
+                    <label>Name<InputText v-model="service.name" placeholder="e.g. Full paint" /></label>
+                    <label>Cost<InputNumber v-model="service.cost" mode="currency" currency="USD" locale="en-US" /></label>
+                    <label>List price<InputNumber v-model="service.list" mode="currency" currency="USD" locale="en-US" /></label>
+                  </div>
+                  <div class="mt-4 flex items-center justify-between gap-3">
+                    <label class="flex cursor-pointer items-center gap-2 text-xs font-bold text-[#5b6476]"><ToggleSwitch v-model="service.extra" /> Extra (add-on item)</label>
+                    <div class="flex items-center gap-2">
+                      <Button v-if="!service.id" type="button" label="Discard" severity="secondary" text size="small" @click="services.splice(index, 1)" />
+                      <Button type="button" icon="pi pi-check" :label="service.id ? 'Save item' : 'Add item'" size="small" outlined :loading="rowSaving === `service-${index}`" @click="saveServiceItem(index)" />
+                    </div>
+                  </div>
+                </article>
+              </div>
+              <div v-else-if="!detailsLoading" class="grid min-h-60 place-items-center rounded-xl border border-dashed border-[#d8dde7] text-center"><div><i class="pi pi-wrench text-2xl text-[#9ba3b1]" /><strong class="mt-3 block">No service items yet</strong><p class="mt-1 text-sm text-[#838c9d]">Add the work types this property orders.</p></div></div>
+            </section>
+
+            <section v-else>
+              <div class="mb-5"><h3 class="m-0 text-lg tracking-[-.02em]">Property images</h3><p class="mt-1 mb-0 text-sm text-[#7c8597]">Reference photos for dispatchers and field teams. Add an image by URL.</p></div>
+              <div class="mb-5 flex gap-3 rounded-xl border border-[#e2e6ed] bg-[#fafbfc] p-4 max-[560px]:flex-col"><InputText v-model="newImageUrl" type="url" placeholder="https://…/photo.jpg" class="min-w-0 flex-1" @keydown.enter.prevent="addImage" /><Button type="button" icon="pi pi-plus" label="Add image" :disabled="!newImageUrl.trim()" :loading="rowSaving === 'image'" @click="addImage" /></div>
+              <div v-if="images.length" class="grid grid-cols-2 gap-3 max-[500px]:grid-cols-1">
+                <article v-for="item in images" :key="item.id ?? item.resource" class="overflow-hidden rounded-xl border border-[#e1e5ec] bg-white"><img :src="item.resource" alt="" class="h-40 w-full bg-[#f0f2f7] object-cover"><div class="flex items-center gap-2 p-3"><button type="button" :disabled="saving" class="min-w-0 flex-1 overflow-hidden border-0 bg-transparent p-0 text-left text-xs font-semibold text-ellipsis whitespace-nowrap" @click="setPrimaryImage(item)"><i :class="['pi mr-1.5', editing.image === item.resource ? 'pi-star-fill text-[#e5a527]' : 'pi-star text-[#9da5b2]']" />{{ editing.image === item.resource ? 'Primary image' : 'Make primary' }}</button></div></article>
+              </div>
+              <div v-else-if="!detailsLoading" class="grid min-h-40 place-items-center rounded-xl border border-dashed border-[#d8dde7] text-center"><div><i class="pi pi-images text-2xl text-[#9ba3b1]" /><strong class="mt-3 block">No images yet</strong></div></div>
+            </section>
+          </template>
 
           <p v-if="saveError" class="mt-6 rounded-xl border border-[#f0c7c7] bg-[#fff7f7] px-4 py-3 text-sm text-[#9c3f3f]" role="alert">{{ saveError }}</p>
 
           <div class="mt-8 flex items-center justify-between gap-4 border-t border-[#e8ebf1] pt-5">
-            <Button v-if="editing.id" type="button" icon="pi pi-trash" label="Delete" severity="danger" text @click="deleteOpen = true" />
+            <Button v-if="editing.id && !editing.archived" type="button" icon="pi pi-archive" label="Archive" severity="danger" text :disabled="saving" @click="archiveOpen = true" />
             <span v-else></span>
-            <div class="flex items-center gap-3"><span v-if="savedNotice" class="text-xs font-bold text-[#138c74]"><i class="pi pi-check-circle mr-1" /> Saved</span><Button type="button" label="Cancel" severity="secondary" text @click="editorOpen = false" /><Button type="submit" icon="pi pi-check" label="Save property" :disabled="!editing.name?.trim()" /></div>
+            <div class="flex items-center gap-3"><span v-if="savedNotice" class="text-xs font-bold text-[#138c74]"><i class="pi pi-check-circle mr-1" /> Saved</span><Button type="button" label="Cancel" severity="secondary" text @click="editorOpen = false" /><Button type="submit" icon="pi pi-check" label="Save property" :loading="saving" :disabled="!editing.name?.trim()" /></div>
           </div>
         </form>
       </template>
     </Drawer>
 
-    <Dialog v-model:visible="deleteOpen" modal header="Delete property?" :style="{ width: '28rem' }">
-      <p class="mt-0 leading-6 text-[#667085]">This permanently removes <strong>{{ editing?.name }}</strong> and its locally stored details.</p>
-      <template #footer><Button label="Cancel" severity="secondary" text @click="deleteOpen = false" /><Button label="Delete property" severity="danger" @click="confirmDelete" /></template>
+    <Dialog v-model:visible="archiveOpen" modal header="Archive property?" :style="{ width: '28rem' }">
+      <p class="mt-0 leading-6 text-[#667085]"><strong>{{ editing?.name }}</strong> will be hidden from active property lists. You can restore it from the Archived filter.</p>
+      <template #footer><Button label="Cancel" severity="secondary" text @click="archiveOpen = false" /><Button label="Archive property" severity="danger" @click="confirmArchive" /></template>
     </Dialog>
   </div>
 </template>

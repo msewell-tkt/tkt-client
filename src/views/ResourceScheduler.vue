@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Drawer from 'primevue/drawer'
@@ -9,7 +8,7 @@ import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import ToggleSwitch from 'primevue/toggleswitch'
-import { auth } from '../auth'
+import AppHeader from '../components/AppHeader.vue'
 
 type JobTone = 'scheduled' | 'active' | 'ready' | 'event'
 
@@ -33,7 +32,6 @@ interface Resource {
   color?: string
 }
 
-const router = useRouter()
 const weekStart = ref(startOfWeek(new Date()))
 const resourceType = ref('All')
 const hideSunday = ref(localStorage.getItem('scheduler-show-sunday') !== 'true')
@@ -239,28 +237,11 @@ function sendSchedule() {
   dispatchNotice.value = true
   window.setTimeout(() => { dispatchNotice.value = false }, 4000)
 }
-
-async function signOut() {
-  await auth.logout()
-  await router.replace({ name: 'login' })
-}
 </script>
 
 <template>
   <div class="min-h-screen bg-[#f5f7fb]">
-    <header class="relative z-10 flex h-[68px] items-center justify-between border-b border-[#e4e7ee] bg-white/90 px-[clamp(1rem,4vw,3.5rem)] backdrop-blur-2xl">
-      <RouterLink class="flex items-center gap-3 font-extrabold tracking-[-.02em]" to="/">
-        <span class="grid h-8 w-8 place-items-center rounded-[.6rem] bg-[#6972ea] text-[.8rem] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></span>
-        <span>Turnkey Tracker</span>
-      </RouterLink>
-      <nav class="mr-auto ml-10 flex self-stretch items-stretch gap-1 max-[900px]:hidden [&_a]:flex [&_a]:items-center [&_a]:border-b-2 [&_a]:border-transparent [&_a]:px-[.8rem] [&_a]:text-[.88rem] [&_a]:font-semibold [&_a]:text-[#667085] [&_a:hover]:text-[#313a51]" aria-label="Primary navigation">
-        <RouterLink class="!border-b-[#5962d8] !text-[#5962d8]" to="/scheduler">Scheduler</RouterLink>
-        <RouterLink to="/properties">Properties</RouterLink><RouterLink to="/work-orders">Work orders</RouterLink><RouterLink to="/users">Users</RouterLink>
-      </nav>
-      <div class="flex items-center gap-3 max-[600px]:[&_.p-button-label]:hidden">
-        <Button icon="pi pi-sign-out" label="Sign out" severity="secondary" text @click="signOut" />
-      </div>
-    </header>
+    <AppHeader />
 
     <main class="px-[clamp(1rem,3vw,2.5rem)] pt-7 pb-12 max-[600px]:px-[.65rem] max-[600px]:pt-4 max-[600px]:pb-8">
       <section class="mx-auto mb-[1.35rem] flex max-w-[1800px] items-end justify-between gap-4 max-[600px]:items-start">

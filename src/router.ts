@@ -41,13 +41,26 @@ const router = createRouter({
   ],
 })
 
+function loginTenantId(query: Record<string, unknown>): string | undefined {
+  return (typeof query.tenantId === 'string' && query.tenantId) || auth.lastTenantId() || undefined
+}
+
 router.beforeEach(async (to) => {
   await auth.initialize()
   if (to.meta.requiresAuth && !auth.isAuthenticated.value) {
-    const tenantId = typeof to.query.tenantId === 'string' ? to.query.tenantId : undefined
-    return { name: 'login', query: { redirect: to.fullPath, tenantId } }
+    return { name: 'login', query: { redirect: to.fullPath, tenantId: loginTenantId(to.query) } }
   }
   if (to.name === 'login' && auth.isAuthenticated.value) return { name: 'home' }
+})
+
+// A protected request that still gets 401 after a refresh attempt lands here, from any view.
+auth.setSessionExpiredHandler(() => {
+  const current = router.currentRoute.value
+  if (current.name === 'login') return
+  void router.replace({
+    name: 'login',
+    query: { redirect: current.fullPath, tenantId: loginTenantId(current.query) },
+  })
 })
 
 export default router

@@ -97,15 +97,19 @@ const email = ref('')
 const pin = ref('')
 const pinRequested = ref(false)
 
+// Tenant comes from the login link (?tenantId=), then the redirect target's link,
+// then the tenant this browser last signed in to, then VITE_TENANT_ID for local development.
 const tenantId = computed(() => {
-  return "cd46b4d4-a714-491e-a4a9-d15628ef9534";
+  const direct = route.query.tenantId
+  if (typeof direct === 'string' && direct) return direct
 
-  // const direct = route.query.tenantId
-  // if (typeof direct === 'string') return direct
-  //
-  // const redirect = route.query.redirect
-  // if (typeof redirect !== 'string') return ''
-  // return new URL(redirect, window.location.origin).searchParams.get('tenantId') ?? ''
+  const redirect = route.query.redirect
+  if (typeof redirect === 'string') {
+    const fromRedirect = new URL(redirect, window.location.origin).searchParams.get('tenantId')
+    if (fromRedirect) return fromRedirect
+  }
+
+  return auth.lastTenantId() ?? import.meta.env.VITE_TENANT_ID ?? ''
 })
 
 function requireTenantId(): string {

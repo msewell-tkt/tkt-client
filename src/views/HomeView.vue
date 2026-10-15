@@ -1,27 +1,6 @@
 <template>
   <div class="min-h-screen bg-[#f4f6fa]">
-    <header class="sticky top-0 z-10 flex h-[72px] items-center justify-between border-b border-[#e4e7ee] bg-white/90 px-[clamp(1rem,4vw,3.5rem)] backdrop-blur-2xl">
-      <RouterLink class="flex items-center gap-3 font-extrabold tracking-[-.02em]" to="/">
-        <span class="grid h-8 w-8 place-items-center rounded-[.6rem] bg-[#6972ea] text-[.8rem] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></span>
-        <span>Turnkey Tracker</span>
-      </RouterLink>
-      <div class="flex items-center gap-3 max-[580px]:[&_.p-tag]:hidden">
-        <RouterLink to="/scheduler">
-          <Button icon="pi pi-calendar" label="Scheduler" severity="secondary" text />
-        </RouterLink>
-        <RouterLink to="/properties">
-          <Button icon="pi pi-building" label="Properties" severity="secondary" text />
-        </RouterLink>
-        <RouterLink to="/work-orders">
-          <Button icon="pi pi-briefcase" label="Work orders" severity="secondary" text />
-        </RouterLink>
-        <RouterLink to="/users">
-          <Button icon="pi pi-users" label="Users" severity="secondary" text />
-        </RouterLink>
-        <Tag value="Session active" severity="success" icon="pi pi-shield" />
-        <Button icon="pi pi-sign-out" label="Sign out" severity="secondary" text @click="signOut" />
-      </div>
-    </header>
+    <AppHeader />
 
     <main class="mx-auto w-[min(1180px,calc(100%-2rem))] py-[clamp(2rem,5vw,4rem)]">
       <section v-if="loading" class="grid min-h-[50vh] content-center justify-items-center gap-4 text-[#697386]">
@@ -57,21 +36,21 @@
           <Card class="border border-[#e4e7ee] shadow-[0_8px_28px_rgba(30,41,75,.045)] [&_.p-card-content]:relative [&_.p-card-content]:grid [&_.p-card-content]:gap-[.35rem] [&_.p-card-content>span]:text-[.83rem] [&_.p-card-content>span]:font-semibold [&_.p-card-content>span]:text-[#70798c] [&_.p-card-content>strong]:text-[2rem] [&_.p-card-content>strong]:tracking-[-.04em] [&_.p-card-content>small]:text-[#8991a1]">
             <template #content>
               <div class="absolute top-0 right-0 grid h-10 w-10 place-items-center rounded-xl bg-[#fff3d9] text-[#bb7914]"><i class="pi pi-wrench" /></div>
-              <span>Open jobs</span><strong>{{session.openJobs}}</strong><small>2 need attention</small>
+              <span>Open jobs</span><strong>{{session.openJobs}}</strong><small>Across your properties</small>
             </template>
           </Card>
           <Card class="border border-[#e4e7ee] shadow-[0_8px_28px_rgba(30,41,75,.045)] [&_.p-card-content]:relative [&_.p-card-content]:grid [&_.p-card-content]:gap-[.35rem] [&_.p-card-content>span]:text-[.83rem] [&_.p-card-content>span]:font-semibold [&_.p-card-content>span]:text-[#70798c] [&_.p-card-content>strong]:text-[2rem] [&_.p-card-content>strong]:tracking-[-.04em] [&_.p-card-content>small]:text-[#8991a1]">
             <template #content>
               <div class="absolute top-0 right-0 grid h-10 w-10 place-items-center rounded-xl bg-[#ddf7f0] text-[#148b75]"><i class="pi pi-check-circle" /></div>
-              <span>Completed this week</span><strong>{{session.completedJobsThisWeek}}</strong><small>On track</small>
+              <span>Completed this week</span><strong>{{session.completedJobsThisWeek}}</strong><small>This week</small>
             </template>
           </Card>
         </section>
 
         <section class="mt-4 grid grid-cols-[1.35fr_.85fr] gap-4 max-[860px]:grid-cols-1">
           <Card class="border border-[#e4e7ee] shadow-[0_8px_28px_rgba(30,41,75,.045)]">
-            <template #title>Recent activity</template>
-            <template #subtitle>The latest changes across your workspace</template>
+            <template #title><span class="flex items-center justify-between gap-3">Recent activity <Tag value="Sample data" severity="secondary" icon="pi pi-info-circle" /></span></template>
+            <template #subtitle>Activity isn’t available from the API yet</template>
             <template #content>
               <div class="grid">
                 <div v-for="item in activity" :key="item.title" class="grid grid-cols-[auto_1fr_auto] items-center gap-4 border-b border-[#edf0f5] py-4 last:border-0">
@@ -99,26 +78,26 @@
         </section>
       </template>
 
-      <Message v-else severity="error" :closable="false">Unable to load your session.</Message>
+      <Message v-else severity="error" :closable="false">{{ loadError || 'Unable to load your session.' }}</Message>
     </main>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { RouterLink, useRouter } from 'vue-router'
+import { onMounted, ref } from 'vue'
+import { RouterLink } from 'vue-router'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import Divider from 'primevue/divider'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import Tag from 'primevue/tag'
-import { auth } from '../auth'
-import { sessionService, type Session } from '../services/SessionService'
+import AppHeader from '../components/AppHeader.vue'
+import { dashboardService, type Session } from '../services/DashboardService'
 
-const router = useRouter()
 const loading = ref(true)
 const session = ref<Session | null>(null)
+const loadError = ref('')
 
 const activity = [
   { icon: 'pi pi-check', color: 'bg-[#ddf7f0] text-[#148b75]', title: 'Inspection completed', detail: 'Riverside unit 4B', time: '12 min' },
@@ -128,16 +107,12 @@ const activity = [
 
 onMounted(async () => {
   try {
-    const response = await sessionService.getDashboard()
-    if (response.ok) session.value = await response.json() as Session
-    else if (response.status === 401) await router.replace({ name: 'login' })
+    session.value = await dashboardService.load()
+  } catch (reason) {
+    loadError.value = reason instanceof Error ? reason.message : ''
   } finally {
     loading.value = false
   }
 })
 
-async function signOut() {
-  await auth.logout()
-  await router.replace({ name: 'login' })
-}
 </script>

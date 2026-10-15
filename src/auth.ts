@@ -16,6 +16,24 @@ interface LoginRequest extends TenantEmailRequest {
   pin: string
 }
 
+const TENANT_STORAGE_KEY = 'tkt-last-tenant-id'
+
+function readStoredTenant(): string | null {
+  try {
+    return localStorage.getItem(TENANT_STORAGE_KEY)
+  } catch {
+    return null
+  }
+}
+
+function storeTenant(tenantId: string) {
+  try {
+    localStorage.setItem(TENANT_STORAGE_KEY, tenantId)
+  } catch {
+    // Storage can be unavailable (private mode); the tenant just won't be remembered.
+  }
+}
+
 class AuthService extends BaseApiService implements ApiAuthentication {
   readonly state = reactive({
     accessToken: null as string | null,
@@ -26,6 +44,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
 
   private refreshPromise: Promise<boolean> | null = null
   private initializePromise: Promise<void> | null = null
+  private sessionExpiredHandler: (() => void) | null = null
 
   constructor() {
     super()
@@ -33,6 +52,21 @@ class AuthService extends BaseApiService implements ApiAuthentication {
 
   getAccessToken(): string | null {
     return this.state.accessToken
+  }
+
+  /** The tenant this browser last signed in to, used to rebuild login links. */
+  lastTenantId(): string | null {
+    return readStoredTenant()
+  }
+
+  /** Registers what happens when the session can no longer be refreshed (the router sends the user to login). */
+  setSessionExpiredHandler(handler: () => void) {
+    this.sessionExpiredHandler = handler
+  }
+
+  onSessionExpired(): void {
+    this.state.accessToken = null
+    this.sessionExpiredHandler?.()
   }
 
   async requestPin(identity: TenantEmailRequest): Promise<void> {
@@ -49,6 +83,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
     const token = await this.tokenRequest('/login', credentials)
     this.state.accessToken = token.accessToken
     this.state.initialized = true
+    storeTenant(credentials.tenantId)
   }
 
   async refresh(): Promise<boolean> {

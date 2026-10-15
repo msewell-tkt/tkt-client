@@ -33,7 +33,7 @@ const defaultPermissions: Record<UserRole, string[]> = {
   QA: ['Manage properties', 'Manage work orders', 'View financials'],
   Property: ['Manage work orders', 'Manage properties'],
   Technician: ['Update assigned work', 'Upload attachments'],
-  Dispatcher: ['Manage work orders', 'Manage work orders'],
+  Dispatcher: ['Manage work orders', 'Update assigned work'],
 }
 
 function activity(id: number, name: string): UserActivity[] {
@@ -64,7 +64,7 @@ export const users = ref<UserRecord[]>([
   user(7, 'Nina Patel', 'nina@turnkeytracker.com', '(678) 555-0194', 'Admin', 'Inactive', 'Former Area Manager', '#687386', 'Sep 18', ['Local Sugar Hill']),
 ])
 
-export const userRoles: UserRole[] = ['Admin', 'QA', 'Dispatcher', 'Technician']
+export const userRoles: UserRole[] = ['Admin', 'Property', 'QA', 'Dispatcher', 'Technician']
 export const userStatuses: UserStatus[] = ['Active', 'Invited', 'Inactive']
 export const permissionOptions = ['Manage users', 'Manage properties', 'Manage work orders', 'View financials', 'Update assigned work', 'Upload attachments']
 export const propertyOptions = ['All properties', 'Ansley Forest', 'Auden Apartments', 'Avonlea Westside', 'Dagney Apartments', 'District at Parkview', 'Emmi Midtown', 'Gentry Buckhead', 'Link Apartments Canvas', 'Local Sugar Hill']
