@@ -419,9 +419,9 @@ onMounted(async () => {
           <p v-if="saveError" class="mt-6 rounded-xl border border-[#f0c7c7] bg-[#fff7f7] px-4 py-3 text-sm text-[#9c3f3f]" role="alert">{{ saveError }}</p>
 
           <div class="mt-8 flex items-center justify-between gap-4 border-t border-[#e8ebf1] pt-5">
-            <Button v-if="editing.id && !editing.archived" type="button" icon="pi pi-archive" label="Archive" severity="danger" text :disabled="saving" @click="archiveOpen = true" />
+            <Button v-if="editing?.id && !editing?.archived" type="button" icon="pi pi-archive" label="Archive" severity="danger" text :disabled="saving" @click="archiveOpen = true" />
             <span v-else></span>
-            <div class="flex items-center gap-3"><span v-if="savedNotice" class="text-xs font-bold text-[#138c74]"><i class="pi pi-check-circle mr-1" /> Saved</span><Button type="button" label="Cancel" severity="secondary" text @click="editorOpen = false" /><Button type="submit" icon="pi pi-check" label="Save property" :loading="saving" :disabled="!editing.name?.trim()" /></div>
+            <div class="flex items-center gap-3"><span v-if="savedNotice" class="text-xs font-bold text-[#138c74]"><i class="pi pi-check-circle mr-1" /> Saved</span><Button type="button" label="Cancel" severity="secondary" text @click="editorOpen = false" /><Button type="submit" icon="pi pi-check" label="Save property" :loading="saving" :disabled="!editing?.name?.trim()" /></div>
           </div>
         </form>
       </template>

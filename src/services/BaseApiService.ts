@@ -27,6 +27,14 @@ export abstract class BaseApiService {
     }, options)
   }
 
+  protected put(path: string, body?: unknown, options?: RequestOptions): Promise<Response> {
+    return this.request(path, {
+      method: 'PUT',
+      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    }, options)
+  }
+
   protected delete(path: string, options?: RequestOptions): Promise<Response> {
     return this.request(path, { method: 'DELETE' }, options)
   }
