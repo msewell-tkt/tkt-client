@@ -1,8 +1,17 @@
 import { BaseApiService, type ApiAuthentication } from './BaseApiService'
 import { auth } from '../auth'
+import type { User } from './User'
 
-/** A work order as listed by `GET /api/work-orders` (only the fields the client reads). */
-export interface WorkOrderSummary {
+export interface WorkOrderProperty {
+  id: string
+  name: string | null
+  address1?: string | null
+  city?: string | null
+  state?: string | null
+}
+
+/** A work order with its jobs (only the fields the client reads). The list endpoint may leave `jobs` out. */
+export interface WorkOrder {
   id: string
   num: string | null
   unit: string | null
@@ -14,10 +23,9 @@ export interface WorkOrderSummary {
   moveOut?: string | null
   /** ISO instant. */
   created: string | null
-  property: { id: string; name: string | null; address1?: string | null; city?: string | null; state?: string | null } | null
-  reportedBy: { id: string; firstName: string | null; lastName: string | null } | null
-  jobCount: number | null
-  openJobCount: number | null
+  property: WorkOrderProperty | null
+  reportedBy: User | null
+  jobs: WorkOrderJob[]
 }
 
 export interface WorkOrderQuery {
@@ -32,90 +40,113 @@ export interface WorkOrderQuery {
 }
 
 export interface WorkOrderPage {
-  workOrders: WorkOrderSummary[]
+  workOrders: WorkOrder[]
   /** Total matches across all pages. */
   total: number
   limit: number
   offset: number
 }
 
-/** A job of a work order, as returned by the create, detail and update endpoints. */
-export interface WorkOrderJobDetail {
+/** A note on a job. */
+export interface JobNote {
+  id: string
+  user: User | null
+  data: string | null
+  type: string | null
+  /** ISO instant. */
+  created: string | null
+}
+
+/** A file on a job: `data` is the file's content or location, `type` its kind. */
+export interface JobAttachment {
+  id: string
+  user: User | null
+  data: string
+  type: string
+  /** ISO instant. */
+  created: string | null
+}
+
+/** An additional item (an "extra") added to a job, beyond its service item. */
+export interface JobExtra {
+  id: string
+  user: User | null
+  name: string
+  list: number | null
+  cost: number | null
+  /** ISO instant. */
+  created: string | null
+}
+
+/** One entry of a job's status history: the status it was given, and by whom. */
+export interface JobStatusEntry {
+  id: string
+  user: User | null
+  /** The status enum's name (`GO_BACK`) or its label (`Go Back`). */
+  status: string | null
+  data: string | null
+  /** ISO instant. */
+  created: string | null
+}
+
+/** A job of a work order. The collections come with the detail endpoint. */
+export interface WorkOrderJob {
   id: string
   num: string | null
   status: string | null
-  /** ISO instant. */
-  scheduled: string | null
+  /** Null while unscheduled. */
+  scheduled: Date | null
   purchaseOrder: string | null
   cost: number | null
   list: number | null
   dispatched: boolean
   alert: boolean
   techUpdated: boolean
-  assignedTo: { id: string; firstName: string | null; lastName: string | null } | null
+  assignedTo: User | null
   serviceItem: { id: string; name: string | null } | null
+  extras: JobExtra[]
+  notes: JobNote[]
+  attachments: JobAttachment[]
+  statuses: JobStatusEntry[]
 }
+
+/** A domain object being created: the fields in `K` are required, the rest are filled in by the API. */
+type Draft<T, K extends keyof T> = Pick<T, K> & Partial<Omit<T, K>>
 
 /** A job to create. Leave `assignedTo` and `scheduled` empty to put it in the scheduler's unscheduled queue. */
-export interface NewJob {
-  serviceItemId: string
-  assignedTo?: string | null
-  scheduled?: Date | null
-  purchaseOrder?: string | null
-  /** Defaults to the service item's cost. */
-  cost?: number | null
-  /** Defaults to the service item's list price. */
-  list?: number | null
-}
+export type NewJob = Draft<WorkOrderJob, 'serviceItem'>
 
 /** A work order to create, with at least one job. Dates are `YYYY-MM-DD`. */
-export interface NewWorkOrder {
-  propertyId: string
-  unit?: string | null
-  occupied?: boolean
-  moveIn?: string | null
-  moveOut?: string | null
-  reportedBy?: string | null
-  jobs: NewJob[]
+export type NewWorkOrder = Omit<Draft<WorkOrder, 'property'>, 'jobs'> & { jobs: NewJob[] }
+
+/** The API sends scheduled instants as ISO strings. */
+function reviveJob(job: WorkOrderJob): WorkOrderJob {
+  return {
+    ...job,
+    scheduled: job.scheduled ? new Date(job.scheduled) : null,
+    extras: job.extras ?? [],
+    notes: job.notes ?? [],
+    attachments: job.attachments ?? [],
+    statuses: job.statuses ?? [],
+  }
 }
 
-/** A work order with its jobs: the create, detail and update responses. */
-export interface WorkOrderDetail {
-  workOrder: WorkOrderSummary
-  jobs: WorkOrderJobDetail[]
-}
-
-/** Fields saved by `PUT /api/work-orders/{id}`. Dates are `YYYY-MM-DD`; null clears a field. */
-export interface WorkOrderChanges {
-  unit: string | null
-  occupied: boolean
-  moveIn: string | null
-  moveOut: string | null
-  reportedBy: string | null
-  /** Open, Complete, Canceled or Archive; omitted keeps the current status. */
-  status?: string
-}
-
-/** Fields saved by `PUT /api/work-orders/{id}/jobs/{jobId}`. Scheduling and assignment go through the scheduler. */
-export interface JobChanges {
-  status: string
-  purchaseOrder: string | null
-  cost: number
-  list: number
-  dispatched: boolean
-  alert: boolean
+function reviveOrder(order: WorkOrder): WorkOrder {
+  return { ...order, jobs: (order.jobs ?? []).map(reviveJob) }
 }
 
 function jobBody(job: NewJob) {
   return {
-    serviceItemId: job.serviceItemId,
-    assignedTo: job.assignedTo ?? null,
+    serviceItem: job.serviceItem ? { id: job.serviceItem.id } : null,
+    assignedTo: job.assignedTo ? { id: job.assignedTo.id } : null,
     scheduled: job.scheduled ? job.scheduled.getTime() : null,
     purchaseOrder: job.purchaseOrder ?? null,
     cost: job.cost ?? null,
     list: job.list ?? null,
   }
 }
+
+const jobPath = (workOrderId: string, jobId: string) => `/api/work-orders/${workOrderId}/jobs/${jobId}`
 
 /** The browser's time zone, so a scheduled job lands on the right day for its technician. */
 function tzQuery() {
@@ -125,6 +156,11 @@ function tzQuery() {
 class WorkOrderService extends BaseApiService {
   constructor(authentication: ApiAuthentication) {
     super(authentication)
+  }
+
+  private async deleteAt(path: string, fallback: string): Promise<void> {
+    const response = await this.delete(path)
+    if (!response.ok) throw new Error(await this.errorMessage(response, fallback))
   }
 
   /** Work orders of the tenant, newest first (`GET /api/work-orders`). */
@@ -140,7 +176,7 @@ class WorkOrderService extends BaseApiService {
       await this.get(`/api/work-orders${qs ? `?${qs}` : ''}`),
       'Couldn’t load work orders.',
     )
-    const workOrders = Array.isArray(payload?.workOrders) ? payload.workOrders : []
+    const workOrders = Array.isArray(payload?.workOrders) ? payload.workOrders.map(reviveOrder) : []
     return {
       workOrders,
       total: payload?.total ?? workOrders.length,
@@ -159,37 +195,74 @@ class WorkOrderService extends BaseApiService {
   }
 
   /** A work order with all its jobs (`GET /api/work-orders/{id}`). */
-  async detail(id: string): Promise<WorkOrderDetail> {
-    return this.data<WorkOrderDetail>(await this.get(`/api/work-orders/${id}`), 'Couldn’t load the work order.')
+  async detail(id: string): Promise<WorkOrder> {
+    return reviveOrder(await this.data<WorkOrder>(await this.get(`/api/work-orders/${id}`), 'Couldn’t load the work order.'))
   }
 
-  /** Saves a work order's own fields and returns it with its jobs. Requires the Admin or Super Admin role. */
-  async update(id: string, changes: WorkOrderChanges): Promise<WorkOrderDetail> {
-    return this.data<WorkOrderDetail>(await this.put(`/api/work-orders/${id}`, changes), 'Unable to save the work order.')
+  /** Saves the whole work order (the API takes its own fields: unit, occupied, dates, reporter and status) and returns it with its jobs. Requires the Admin or Super Admin role. */
+  async update(order: WorkOrder): Promise<WorkOrder> {
+    return reviveOrder(await this.data<WorkOrder>(await this.put(`/api/work-orders/${order.id}`, order), 'Unable to save the work order.'))
   }
 
-  /** Saves a job's status, PO, prices and flags. Requires the Admin or Super Admin role. */
-  async updateJob(workOrderId: string, jobId: string, changes: JobChanges): Promise<WorkOrderJobDetail> {
-    return this.data<WorkOrderJobDetail>(
-      await this.put(`/api/work-orders/${workOrderId}/jobs/${jobId}`, changes),
+  /** Deletes a work order and all its jobs. Requires the Admin or Super Admin role. */
+  async remove(id: string): Promise<void> {
+    await this.deleteAt(`/api/work-orders/${id}`, 'Unable to delete the work order.')
+  }
+
+  /** Deletes one job of a work order. Requires the Admin or Super Admin role. */
+  async removeJob(workOrderId: string, jobId: string): Promise<void> {
+    await this.deleteAt(jobPath(workOrderId, jobId), 'Unable to delete the job.')
+  }
+
+  /** Adds a note to a job, or updates it when `note.id` is set. Requires the Admin or Super Admin role. */
+  async saveNote(workOrderId: string, jobId: string, note: Partial<JobNote>): Promise<JobNote> {
+    return this.data<JobNote>(await this.post(`${jobPath(workOrderId, jobId)}/notes`, note), 'Unable to save the note.')
+  }
+
+  async removeNote(workOrderId: string, jobId: string, id: string): Promise<void> {
+    await this.deleteAt(`${jobPath(workOrderId, jobId)}/notes/${id}`, 'Unable to delete the note.')
+  }
+
+  /** Adds an additional item to a job, or updates it when `extra.id` is set. Requires the Admin or Super Admin role. */
+  async saveExtra(workOrderId: string, jobId: string, extra: Partial<JobExtra>): Promise<JobExtra> {
+    return this.data<JobExtra>(await this.post(`${jobPath(workOrderId, jobId)}/items`, extra), 'Unable to save the item.')
+  }
+
+  async removeExtra(workOrderId: string, jobId: string, id: string): Promise<void> {
+    await this.deleteAt(`${jobPath(workOrderId, jobId)}/items/${id}`, 'Unable to delete the item.')
+  }
+
+  /** Adds an attachment to a job, or updates it when `attachment.id` is set. Requires the Admin or Super Admin role. */
+  async saveAttachment(workOrderId: string, jobId: string, attachment: Partial<JobAttachment>): Promise<JobAttachment> {
+    return this.data<JobAttachment>(await this.post(`${jobPath(workOrderId, jobId)}/attachments`, attachment), 'Unable to save the attachment.')
+  }
+
+  async removeAttachment(workOrderId: string, jobId: string, id: string): Promise<void> {
+    await this.deleteAt(`${jobPath(workOrderId, jobId)}/attachments/${id}`, 'Unable to delete the attachment.')
+  }
+
+  /** Saves the whole job (the API takes its status, PO, prices and flags; scheduling and assignment go through the scheduler). Requires the Admin or Super Admin role. */
+  async updateJob(workOrderId: string, job: WorkOrderJob): Promise<WorkOrderJob> {
+    return reviveJob(await this.data<WorkOrderJob>(
+      await this.put(jobPath(workOrderId, job.id), job),
       'Unable to save the job.',
-    )
+    ))
   }
 
   /** Creates a work order and its jobs. Requires the Admin or Super Admin role. */
-  async create(order: NewWorkOrder): Promise<WorkOrderDetail> {
-    return this.data<WorkOrderDetail>(
+  async create(order: NewWorkOrder): Promise<WorkOrder> {
+    return reviveOrder(await this.data<WorkOrder>(
       await this.post(`/api/work-orders${tzQuery()}`, { ...order, jobs: order.jobs.map(jobBody) }),
       'Unable to create the work order.',
-    )
+    ))
   }
 
   /** Adds a job to an existing work order. Requires the Admin or Super Admin role. */
-  async addJob(workOrderId: string, job: NewJob): Promise<WorkOrderJobDetail> {
-    return this.data<WorkOrderJobDetail>(
+  async addJob(workOrderId: string, job: NewJob): Promise<WorkOrderJob> {
+    return reviveJob(await this.data<WorkOrderJob>(
       await this.post(`/api/work-orders/${workOrderId}/jobs${tzQuery()}`, jobBody(job)),
       'Unable to add the job.',
-    )
+    ))
   }
 }
 

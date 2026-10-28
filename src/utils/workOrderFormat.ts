@@ -1,11 +1,20 @@
-/** `YYYY-MM-DD` dates are shown as calendar dates (UTC, no shift); ISO instants in the viewer's time zone. */
-export function formatDate(value: string) {
+import { isClosedStatus } from '../constants/jobStatus'
+import type { WorkOrder } from '../services/WorkOrderService'
+
+export const jobCount = (order: Pick<WorkOrder, 'jobs'>) => order.jobs.length
+
+export const openJobCount = (order: Pick<WorkOrder, 'jobs'>) => order.jobs.filter((job) => !isClosedStatus(job.status)).length
+
+/** `YYYY-MM-DD` dates are shown as calendar dates (UTC, no shift); ISO instants and `Date`s in the viewer's time zone. */
+export function formatDate(value: string | Date | null) {
   if (!value) return 'Not scheduled'
-  const date = value.length > 10 ? new Date(value) : new Date(`${value}T00:00:00Z`)
-  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: value.length > 10 ? undefined : 'UTC' }).format(date)
+  const calendarDate = typeof value === 'string' && value.length <= 10
+  const date = calendarDate ? new Date(`${value}T00:00:00Z`) : new Date(value)
+  return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: calendarDate ? 'UTC' : undefined }).format(date)
 }
 
-export function formatTimestamp(value: string) {
+export function formatTimestamp(value: string | null) {
+  if (!value) return '—'
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value))
 }
 

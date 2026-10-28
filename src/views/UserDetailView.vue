@@ -9,16 +9,16 @@ import MultiSelect from 'primevue/multiselect'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import AppHeader from '../components/AppHeader.vue'
-import { permissionOptions, propertyOptions, userRoles, users, userStatuses, type UserRecord, type UserStatus } from '../data/users'
+import { permissionOptions, propertyOptions, userRoles, users, userStatuses, type User, type UserStatus } from '../data/users'
 
 const route = useRoute()
 const router = useRouter()
 const isNew = computed(() => route.params.id === 'new')
 const existing = computed(() => users.value.find((item) => item.id === Number(route.params.id)))
 const saved = ref(false)
-const form = ref<UserRecord>(emptyUser())
+const form = ref<User>(emptyUser())
 
-function emptyUser(): UserRecord {
+function emptyUser(): User {
   return { id: 0, name: '', email: '', phone: '', role: 'Technician', status: 'Invited', title: '', initials: '', color: '#5962d8', lastActive: 'Invite pending', joined: new Date().toISOString().slice(0, 10), properties: [], permissions: ['Manage work orders'], activity: [] }
 }
 

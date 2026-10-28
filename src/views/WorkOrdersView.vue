@@ -8,8 +8,9 @@ import Select from 'primevue/select'
 import AppHeader from '../components/AppHeader.vue'
 import WorkOrderDrawer from '../components/WorkOrderDrawer.vue'
 import { propertyService, type Property } from '../services/PropertyService'
-import { workOrderService, type WorkOrderDetail, type WorkOrderSummary } from '../services/WorkOrderService'
-import { formatDate, statusClass } from '../utils/workOrderFormat'
+import { workOrderService, type WorkOrder } from '../services/WorkOrderService'
+import { userName } from '../services/User'
+import { formatDate, jobCount, openJobCount, statusClass } from '../utils/workOrderFormat'
 
 const query = ref('')
 const ALL_STATUSES = 'All'
@@ -25,7 +26,7 @@ const statusOptions = ref<string[]>([ALL_STATUSES])
 const drawerOpen = ref(false)
 /** Work order shown in the drawer; null creates a new one. */
 const editingId = ref<string | null>(null)
-const workOrders = ref<WorkOrderSummary[]>([])
+const workOrders = ref<WorkOrder[]>([])
 
 let loadSeq = 0
 let searchTimer: number | undefined
@@ -67,14 +68,10 @@ watch(query, () => {
 
 
 const propertyOptions = computed(() => [ALL_PROPERTIES, ...properties.value.map((item) => item.name).sort()])
-const openJobs = computed(() => workOrders.value.reduce((sum, item) => sum + (item.openJobCount ?? 0), 0))
-const closedJobs = computed(() => workOrders.value.reduce((sum, item) => sum + (item.jobCount ?? 0) - (item.openJobCount ?? 0), 0))
+const openJobs = computed(() => workOrders.value.reduce((sum, item) => sum + openJobCount(item), 0))
+const closedJobs = computed(() => workOrders.value.reduce((sum, item) => sum + jobCount(item) - openJobCount(item), 0))
 
-function reporter(order: WorkOrderSummary) {
-  return [order.reportedBy?.firstName, order.reportedBy?.lastName].filter(Boolean).join(' ')
-}
-
-function openOrder(order: WorkOrderSummary) {
+function openOrder(order: WorkOrder) {
   editingId.value = order.id
   drawerOpen.value = true
 }
@@ -85,11 +82,17 @@ function addOrder() {
 }
 
 /** Keeps the list current after the drawer saves: refresh the row, or reload when a new order isn't on the page. */
-function onSaved(detail: WorkOrderDetail) {
-  editingId.value = detail.workOrder.id
-  const row = workOrders.value.findIndex((item) => item.id === detail.workOrder.id)
-  if (row >= 0) workOrders.value[row] = detail.workOrder
+function onSaved(order: WorkOrder) {
+  editingId.value = order.id
+  const row = workOrders.value.findIndex((item) => item.id === order.id)
+  if (row >= 0) workOrders.value[row] = order
   else void loadOrders()
+}
+
+function onDeleted(id: string) {
+  editingId.value = null
+  workOrders.value = workOrders.value.filter((item) => item.id !== id)
+  total.value = Math.max(0, total.value - 1)
 }
 </script>
 
@@ -118,11 +121,11 @@ function onSaved(detail: WorkOrderDetail) {
         <div v-if="loading && !workOrders.length" class="grid min-h-64 place-items-center" role="status" aria-label="Loading work orders"><ProgressSpinner stroke-width="4" class="!h-10 !w-10" /></div>
         <div v-else-if="workOrders.length">
           <button v-for="order in workOrders" :key="order.id" type="button" class="group grid w-full grid-cols-[minmax(200px,1.3fr)_140px_150px_140px_minmax(150px,1fr)_110px_36px] items-center gap-4 border-0 border-b border-[#edf0f4] bg-white px-5 py-4 text-left text-inherit last:border-b-0 hover:bg-[#fafbff] max-[960px]:grid-cols-[1fr_auto]" @click="openOrder(order)">
-            <span class="min-w-0"><span class="block overflow-hidden text-[.9rem] font-bold text-ellipsis whitespace-nowrap text-[#293246]">{{ order.property?.name || 'Unknown property' }}</span><small class="mt-1 block text-[#8a93a4]">WO #{{ order.num || '—' }} · {{ order.jobCount ?? 0 }} job{{ order.jobCount === 1 ? '' : 's' }}</small></span>
+            <span class="min-w-0"><span class="block overflow-hidden text-[.9rem] font-bold text-ellipsis whitespace-nowrap text-[#293246]">{{ order.property?.name || 'Unknown property' }}</span><small class="mt-1 block text-[#8a93a4]">WO #{{ order.num || '—' }} · {{ jobCount(order) }} job{{ jobCount(order) === 1 ? '' : 's' }}</small></span>
             <span class="text-[.84rem] text-[#4e586d] max-[960px]:hidden">{{ order.created ? formatDate(order.created) : '—' }}</span><span class="text-[.84rem] font-semibold text-[#4e586d] max-[960px]:hidden">{{ order.unit }}</span>
             <span class="max-[960px]:row-start-2"><span :class="['inline-flex rounded-full px-2.5 py-1 text-[.72rem] font-bold', statusClass(order.status ?? '')]">{{ order.status }}</span></span>
-            <span class="overflow-hidden text-[.84rem] text-ellipsis whitespace-nowrap text-[#4e586d] max-[960px]:hidden"><i class="pi pi-user mr-2 text-xs text-[#9aa2b0]" />{{ reporter(order) || '—' }}</span>
-            <span class="max-[960px]:hidden"><span class="text-[.8rem] font-semibold text-[#596276]">{{ order.openJobCount ?? 0 }} of {{ order.jobCount ?? 0 }}</span></span>
+            <span class="overflow-hidden text-[.84rem] text-ellipsis whitespace-nowrap text-[#4e586d] max-[960px]:hidden"><i class="pi pi-user mr-2 text-xs text-[#9aa2b0]" />{{ userName(order.reportedBy) || '—' }}</span>
+            <span class="max-[960px]:hidden"><span class="text-[.8rem] font-semibold text-[#596276]">{{ openJobCount(order) }} of {{ jobCount(order) }}</span></span>
             <span class="grid h-8 w-8 place-items-center rounded-full text-[#a1a8b5] group-hover:bg-[#eceeff] group-hover:text-[#5962d8] max-[960px]:col-start-2 max-[960px]:row-span-2 max-[960px]:row-start-1"><i class="pi pi-chevron-right text-xs" /></span>
           </button>
         </div>
@@ -132,6 +135,6 @@ function onSaved(detail: WorkOrderDetail) {
     </main>
 
 
-    <WorkOrderDrawer v-model:visible="drawerOpen" :order-id="editingId" @saved="onSaved" />
+    <WorkOrderDrawer v-model:visible="drawerOpen" :order-id="editingId" @saved="onSaved" @deleted="onDeleted" />
   </div>
 </template>

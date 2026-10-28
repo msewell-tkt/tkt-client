@@ -11,7 +11,7 @@ export interface UserActivity {
   timestamp: string
 }
 
-export interface UserRecord {
+export interface User {
   id: number
   name: string
   email: string
@@ -44,7 +44,7 @@ function activity(id: number, name: string): UserActivity[] {
   ]
 }
 
-function user(id: number, name: string, email: string, phone: string, role: UserRole, status: UserStatus, title: string, color: string, lastActive: string, properties: string[]): UserRecord {
+function user(id: number, name: string, email: string, phone: string, role: UserRole, status: UserStatus, title: string, color: string, lastActive: string, properties: string[]): User {
   return {
     id, name, email, phone, role, status, title, color, lastActive, properties,
     initials: name.split(' ').map((part) => part[0]).slice(0, 2).join(''),
@@ -54,7 +54,7 @@ function user(id: number, name: string, email: string, phone: string, role: User
   }
 }
 
-export const users = ref<UserRecord[]>([
+export const users = ref<User[]>([
   user(1, 'Barbara Smrecak', 'barbara@turnkeytracker.com', '(404) 555-0102', 'Admin', 'Active', 'Operations Director', '#5962d8', 'Just now', ['All properties']),
   user(2, 'Reyna Cardenas', 'reyna@turnkeytracker.com', '(470) 555-0147', 'Admin', 'Active', 'Regional Manager', '#0f9279', '12 min ago', ['Ansley Forest', 'Auden Apartments', 'Avonlea Westside']),
   user(3, 'Marcus Hill', 'marcus@turnkeytracker.com', '(678) 555-0163', 'Technician', 'Active', 'Lead Technician', '#b87417', '1 hr ago', ['Ansley Forest', 'Emmi Midtown']),

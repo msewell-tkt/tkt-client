@@ -535,6 +535,6 @@ onMounted(() => {
       <template #footer><Button v-if="selectedJob?.source?.workOrder" label="Open work order" icon="pi pi-external-link" severity="secondary" text @click="editWorkOrder" /><Button label="Done" @click="jobOpen = false" /></template>
     </Dialog>
 
-    <WorkOrderDrawer v-model:visible="orderOpen" :order-id="orderId" @saved="onOrderSaved" />
+    <WorkOrderDrawer v-model:visible="orderOpen" :order-id="orderId" @saved="onOrderSaved" @deleted="onOrderSaved" />
   </div>
 </template>
