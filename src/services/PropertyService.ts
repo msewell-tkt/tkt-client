@@ -16,6 +16,8 @@ export interface ServiceItem {
   cost: number | null
   list: number | null
   extra: boolean
+  /** True when the item is available to every property of the tenant rather than one property. */
+  global?: boolean
 }
 
 /** A property resource; today the client uses these as image URLs. */
@@ -82,6 +84,20 @@ class PropertyService extends BaseApiService {
 
   async serviceItems(propertyId: string): Promise<ServiceItem[]> {
     return this.fetchList(`/api/properties/${propertyId}/service-items`, 'Couldn’t load service items.')
+  }
+
+  /** The property's own service items plus the tenant's global ones: what a job at the property can use. */
+  async availableServiceItems(propertyId: string): Promise<ServiceItem[]> {
+    return this.fetchList(`/api/properties/${propertyId}/available-service-items`, 'Couldn’t load service items.')
+  }
+
+  /** Service items available to every property of the tenant. */
+  async globalServiceItems(): Promise<ServiceItem[]> {
+    return this.fetchList('/api/service-items', 'Couldn’t load global service items.')
+  }
+
+  async saveGlobalServiceItem(item: ServiceItem): Promise<ServiceItem> {
+    return this.data<ServiceItem>(await this.post('/api/service-items', item), 'Unable to save the service item.')
   }
 
   async saveServiceItem(propertyId: string, item: ServiceItem): Promise<ServiceItem> {
