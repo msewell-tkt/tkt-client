@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Checkbox from 'primevue/checkbox'
+import DatePicker from 'primevue/datepicker'
 import Dialog from 'primevue/dialog'
 import Drawer from 'primevue/drawer'
 import InputNumber from 'primevue/inputnumber'
@@ -12,6 +13,8 @@ import Select from 'primevue/select'
 import Textarea from 'primevue/textarea'
 import { JOB_STATUSES, StatusEnum } from '../constants/jobStatus'
 import { propertyService, type Property, type ServiceItem } from '../services/PropertyService'
+import { schedulerService } from '../services/SchedulerService'
+import { userService } from '../services/UserService'
 import { userName, type User } from '../services/User'
 import { workOrderService, type JobAttachment, type JobExtra, type JobNote, type JobStatusEntry, type NewJob, type WorkOrder, type WorkOrderJob, type WorkOrderProperty } from '../services/WorkOrderService'
 import { formatDate, formatTimestamp, money, statusClass } from '../utils/workOrderFormat'
@@ -77,6 +80,7 @@ interface OrderDraft {
 
 const properties = ref<Property[]>([])
 const orderStatusOptions = ref<string[]>([])
+const assignees = ref<User[]>([])
 const editing = ref<OrderDraft | null>(null)
 const activeJobId = ref<string | 'overview'>('overview')
 const activeJobSection = ref<JobSection>('details')
@@ -95,6 +99,9 @@ const noteDraft = ref('')
 const editingExtraId = ref<string | null>(null)
 const extraDraft = ref({ name: '', list: 0, cost: 0 })
 const selectedServiceItem = ref('')
+/** The user chosen while editing a note, additional item or attachment. */
+const entryUserId = ref<string | null>(null)
+const editingAttachmentId = ref<string | null>(null)
 
 let lookupsLoaded = false
 let savedTimer: number | undefined
@@ -111,6 +118,8 @@ const jobSections: Array<{ value: JobSection; label: string; icon: string }> = [
 const isNew = (id: string) => id.startsWith('new-')
 
 const assignee = (job: JobDraft) => userName(job.assignedTo) || 'Unassigned'
+/** The user's name; history rows, notes and items come back with just the user's id, so fall back to the users list. */
+const authorName = (user: User | null) => userName(user) || userName(assignees.value.find((item) => item.id === user?.id)) || 'Unknown user'
 const jobName = (job: JobDraft) => job.serviceItem?.name ?? (job.saved ? 'Job' : 'New job')
 
 /** The status's label, whether the API sent the enum's name (`GO_BACK`) or its label (`Go Back`). */
@@ -187,6 +196,13 @@ function fromOrder(order: WorkOrder): OrderDraft {
 
 const activeJob = computed(() => editing.value?.jobs.find((job) => job.id === activeJobId.value) ?? null)
 const extraOptions = computed(() => (serviceItemsByProperty.value[editing.value?.property?.id ?? ''] ?? []).filter((item) => item.extra))
+/** The tenant's users, plus the job's current assignee when the list doesn't include them. */
+const assigneeOptions = computed(() => {
+  const current = activeJob.value?.assignedTo
+  return current && !assignees.value.some((user) => user.id === current.id) ? [current, ...assignees.value] : assignees.value
+})
+/** The users an entry can be credited to, plus its current user when the list doesn't include them. */
+const entryUserOptions = (current: User | null) => (current && !assignees.value.some((user) => user.id === current.id) ? [current, ...assignees.value] : assignees.value)
 const jobTypeOptions = computed(() => (serviceItemsByProperty.value[editing.value?.property?.id ?? ''] ?? []).filter((item) => !item.extra))
 const jobTypePlaceholder = computed(() => {
   const propertyId = editing.value?.property?.id
@@ -201,10 +217,12 @@ function loadLookups() {
   lookupsLoaded = true
   propertyService.list().then((view) => { properties.value = view.properties }).catch(() => { lookupsLoaded = false })
   workOrderService.statuses().then((values) => { orderStatusOptions.value = values }).catch(() => { lookupsLoaded = false })
+  userService.list().then((users) => { assignees.value = users.filter((user) => !user.archived) }).catch(() => { lookupsLoaded = false })
 }
 
 function loadServiceItems(propertyId: string) {
-  if (!propertyId || serviceItemsByProperty.value[propertyId]) return
+  // always refetch: the drawer stays mounted, so a cached list would miss items added since it was first opened
+  if (!propertyId) return
   propertyService.availableServiceItems(propertyId)
     .then((items) => { serviceItemsByProperty.value[propertyId] = items })
     .catch((reason) => { saveError.value = reason instanceof Error ? reason.message : 'Couldn’t load service items.' })
@@ -270,6 +288,10 @@ function pickServiceItem(job: JobDraft, serviceItemId: string) {
   job.list = item.list ?? 0
 }
 
+function pickAssignee(job: JobDraft, userId: string | null) {
+  job.assignedTo = userId ? assigneeOptions.value.find((user) => user.id === userId) ?? null : null
+}
+
 function selectJob(id: string | 'overview') {
   activeJobId.value = id
   activeJobSection.value = 'details'
@@ -312,7 +334,22 @@ async function deleteJob() {
 }
 
 function newJobBody(job: JobDraft): NewJob {
-  return { serviceItem: job.serviceItem, purchaseOrder: job.purchaseOrder.trim() || null, cost: job.cost ?? 0, list: job.list ?? 0 }
+  return { serviceItem: job.serviceItem, assignedTo: job.assignedTo, scheduled: job.scheduled, purchaseOrder: job.purchaseOrder.trim() || null, cost: job.cost ?? 0, list: job.list ?? 0 }
+}
+
+/** Whether the drawer edited any of the fields the job save takes. Notes, items and attachments save on their own. */
+function jobChanged(job: JobDraft, source: WorkOrderJob) {
+  return job.status !== (source.status ?? 'New')
+    || (job.purchaseOrder.trim() || null) !== (source.purchaseOrder ?? null)
+    || (job.cost ?? 0) !== (source.cost ?? 0)
+    || (job.list ?? 0) !== (source.list ?? 0)
+    || job.dispatched !== source.dispatched
+    || job.alert !== source.alert
+}
+
+/** Whether a saved job's assignee or scheduled time was edited; those save through the scheduler, not the job. */
+function scheduleChanged(job: JobDraft, source: WorkOrderJob) {
+  return (job.assignedTo?.id ?? null) !== (source.assignedTo?.id ?? null) || (job.scheduled?.getTime() ?? null) !== (source.scheduled?.getTime() ?? null)
 }
 
 /** The whole work order with the drawer's edits applied. */
@@ -362,6 +399,13 @@ async function saveOrder() {
     saveError.value = 'Choose a job type for every job.'
     return
   }
+  const unscheduled = order.jobs.find((job) => job.source && scheduleChanged(job, job.source) && !job.scheduled && job.assignedTo && !job.source.scheduled)
+  if (unscheduled) {
+    activeJobId.value = unscheduled.id
+    activeJobSection.value = 'details'
+    saveError.value = 'Choose a date and time to assign the job.'
+    return
+  }
   saving.value = true
   try {
     let id = order.id
@@ -380,7 +424,13 @@ async function saveOrder() {
       await workOrderService.update(orderBody(order, order.source))
       for (const job of order.jobs) {
         if (job.source) {
-          await workOrderService.updateJob(id, jobBody(job, job.source))
+          // the API logs a status history entry on every job save, so leave unedited jobs alone
+          if (jobChanged(job, job.source)) await workOrderService.updateJob(id, jobBody(job, job.source))
+          if (scheduleChanged(job, job.source)) {
+            // clearing the date sends the job back to the unscheduled queue, which also clears its assignee
+            if (job.scheduled) await schedulerService.moveJob(job.id, { assignedTo: job.assignedTo?.id ?? null, scheduled: job.scheduled })
+            else await schedulerService.unscheduleJob(job.id)
+          }
         } else {
           // mark it saved straight away so a retry after a later failure doesn't add it twice
           const added = await workOrderService.addJob(id, newJobBody(job))
@@ -448,8 +498,12 @@ async function addNote() {
   }, 'Unable to save the note.')
 }
 
+/** The user picked for an entry, or its current user when none was picked. */
+const pickedUser = (current: User | null) => entryUserOptions(current).find((user) => user.id === entryUserId.value) ?? current
+
 function startNoteEdit(note: JobNote) {
   editingNoteId.value = note.id
+  entryUserId.value = note.user?.id ?? null
   noteDraft.value = note.data ?? ''
 }
 
@@ -458,7 +512,7 @@ async function saveNoteEdit(note: JobNote) {
   const text = noteDraft.value.trim()
   if (!text) return
   await changeEntries(async (orderId, job) => {
-    const updated = await workOrderService.saveNote(orderId, job.id, { ...note, data: text })
+    const updated = await workOrderService.saveNote(orderId, job.id, { ...note, data: text, user: pickedUser(note.user) })
     job.notes = job.notes.map((item) => (item.id === updated.id ? updated : item))
     editingNoteId.value = null
   }, 'Unable to save the note.')
@@ -482,6 +536,7 @@ async function addServiceItem() {
 
 function startExtraEdit(extra: JobExtra) {
   editingExtraId.value = extra.id
+  entryUserId.value = extra.user?.id ?? null
   extraDraft.value = { name: extra.name, list: extra.list ?? 0, cost: extra.cost ?? 0 }
 }
 
@@ -489,7 +544,7 @@ async function saveExtraEdit(extra: JobExtra) {
   const { name, list, cost } = extraDraft.value
   if (!name.trim()) return
   await changeEntries(async (orderId, job) => {
-    const updated = await workOrderService.saveExtra(orderId, job.id, { ...extra, name: name.trim(), list, cost })
+    const updated = await workOrderService.saveExtra(orderId, job.id, { ...extra, name: name.trim(), list, cost, user: pickedUser(extra.user) })
     job.extras = job.extras.map((item) => (item.id === updated.id ? updated : item))
     editingExtraId.value = null
   }, 'Unable to save the item.')
@@ -520,6 +575,19 @@ async function handleAttachments(event: Event) {
       const saved = await workOrderService.saveAttachment(orderId, job.id, { data: await readAsDataUrl(file), type: file.type })
       job.attachments.unshift(saved)
     }
+  }, 'Unable to save the attachment.')
+}
+
+function startAttachmentEdit(attachment: JobAttachment) {
+  editingAttachmentId.value = attachment.id
+  entryUserId.value = attachment.user?.id ?? null
+}
+
+async function saveAttachmentUser(attachment: JobAttachment) {
+  await changeEntries(async (orderId, job) => {
+    const updated = await workOrderService.saveAttachment(orderId, job.id, { ...attachment, user: pickedUser(attachment.user) })
+    job.attachments = job.attachments.map((item) => (item.id === updated.id ? updated : item))
+    editingAttachmentId.value = null
   }, 'Unable to save the attachment.')
 }
 
@@ -572,29 +640,29 @@ async function removeAttachment(id: string) {
               <Message v-if="activeJobSection !== 'details' && !activeJob.saved" severity="info" :closable="false" class="mb-5">Save the work order to add notes, additional items and attachments to this job.</Message>
   
               <div v-if="activeJobSection === 'details'" class="grid grid-cols-[1fr_260px] gap-6 max-[760px]:grid-cols-1">
-                <div class="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1 [&_label]:grid [&_label]:gap-2 [&_label]:text-[.77rem] [&_label]:font-bold [&_label]:text-[#4c566a] [&_.p-inputtext]:w-full [&_.p-select]:w-full [&_.p-inputnumber]:w-full">
-                  <label class="col-span-2 max-[560px]:col-span-1">Job type<Select :model-value="activeJob.serviceItem?.id" :options="jobTypeOptions" option-label="name" option-value="id" filter :placeholder="jobTypePlaceholder" :disabled="activeJob.saved || !editing.property" @update:model-value="pickServiceItem(activeJob, $event)" /></label><label>Status<Select v-model="activeJob.status" :options="jobStatuses" :disabled="!activeJob.saved" /></label><label>PO number<InputText v-model="activeJob.purchaseOrder" /></label><label>Scheduled<InputText :model-value="activeJob.scheduled ? formatDate(activeJob.scheduled) : 'Unscheduled'" disabled /></label><label>Assigned to<InputText :model-value="assignee(activeJob)" disabled /></label><label>Cost<InputNumber v-model="activeJob.cost" mode="currency" currency="USD" locale="en-US" :min="0" /></label><label>List price<InputNumber v-model="activeJob.list" mode="currency" currency="USD" locale="en-US" :min="0" /></label><small class="col-span-2 font-normal text-[#858e9f] max-[560px]:col-span-1">Schedule and assign jobs in the Resource Scheduler.</small>
+                <div class="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1 [&_label]:grid [&_label]:gap-2 [&_label]:text-[.77rem] [&_label]:font-bold [&_label]:text-[#4c566a] [&_.p-inputtext]:w-full [&_.p-select]:w-full [&_.p-inputnumber]:w-full [&_.p-datepicker]:w-full">
+                  <label class="col-span-2 max-[560px]:col-span-1">Job type<Select :model-value="activeJob.serviceItem?.id" :options="jobTypeOptions" option-label="name" option-value="id" filter :placeholder="jobTypePlaceholder" :disabled="activeJob.saved || !editing.property" @update:model-value="pickServiceItem(activeJob, $event)" /></label><label>Status<Select v-model="activeJob.status" :options="jobStatuses" :disabled="!activeJob.saved" /></label><label>PO number<InputText v-model="activeJob.purchaseOrder" /></label><label>Scheduled<DatePicker v-model="activeJob.scheduled" show-time hour-format="12" show-button-bar date-format="M d, yy" placeholder="Unscheduled" /></label><label>Assigned to<Select :model-value="activeJob.assignedTo?.id ?? null" :options="assigneeOptions" :option-label="userName" option-value="id" show-clear filter placeholder="Unassigned" @update:model-value="pickAssignee(activeJob, $event)" /></label><label>Cost<InputNumber v-model="activeJob.cost" mode="currency" currency="USD" locale="en-US" :min="0" /></label><label>List price<InputNumber v-model="activeJob.list" mode="currency" currency="USD" locale="en-US" :min="0" /></label><small class="col-span-2 font-normal text-[#858e9f] max-[560px]:col-span-1">Changing the date or assignee takes the job off dispatch. Clearing the date returns the job to the unscheduled queue and unassigns it.</small>
                 </div>
                 <aside class="self-start rounded-2xl border border-[#e2e6ed] bg-[#fafbfc] p-5"><p class="mt-0 mb-4 text-[.7rem] font-extrabold tracking-[.1em] text-[#7a8395] uppercase">Dispatch attributes</p><label class="mb-3 flex cursor-pointer items-center justify-between gap-4 rounded-xl bg-white px-4 py-3 shadow-[0_1px_2px_rgba(20,30,55,.06)]"><span><strong class="block text-sm">Dispatched</strong><small class="text-[#858e9f]">Sent to assignee</small></span><Checkbox v-model="activeJob.dispatched" binary /></label><label class="mb-3 flex cursor-pointer items-center justify-between gap-4 rounded-xl bg-white px-4 py-3 shadow-[0_1px_2px_rgba(20,30,55,.06)]"><span><strong class="block text-sm">Alert</strong><small class="text-[#858e9f]">Needs attention</small></span><Checkbox v-model="activeJob.alert" binary /></label><label class="flex cursor-pointer items-center justify-between gap-4 rounded-xl bg-white px-4 py-3 shadow-[0_1px_2px_rgba(20,30,55,.06)]"><span><strong class="block text-sm">Tech updated</strong><small class="text-[#858e9f]">Changes reviewed</small></span><Checkbox v-model="activeJob.techUpdated" binary disabled /></label><div class="mt-5 border-t border-[#e2e5eb] pt-4"><div class="mb-2 flex justify-between text-sm text-[#727c8f]"><span>Cost</span><strong class="text-[#30394d]">{{ money(activeJob.cost) }}</strong></div><div class="flex justify-between text-sm text-[#727c8f]"><span>List price</span><strong class="text-[#30394d]">{{ money(activeJob.list) }}</strong></div></div></aside>
               </div>
   
               <div v-else-if="activeJobSection === 'notes'">
                 <div class="mb-5 rounded-2xl border border-[#e1e5ed] bg-[#fafbfc] p-4"><Textarea v-model="noteText" rows="3" class="w-full" :disabled="!activeJob.saved" placeholder="Add an update for the team…" /><div class="mt-3 flex items-center justify-between gap-3"><small class="text-[#858e9f]">Notes are saved straight away.</small><Button type="button" icon="pi pi-send" label="Add note" size="small" :disabled="!activeJob.saved || !noteText.trim()" :loading="entryBusy" @click="addNote" /></div></div>
-                <div class="relative ml-4 border-l border-[#dfe3ea] pl-6"><article v-for="note in activeJob.notes" :key="note.id" class="relative mb-4 rounded-xl border border-[#e3e7ee] bg-white p-4 last:mb-0"><span class="absolute top-5 -left-[2.05rem] grid h-4 w-4 place-items-center rounded-full border-4 border-white bg-[#6972ea]" /><div class="mb-2 flex flex-wrap items-center justify-between gap-2"><strong class="text-sm">{{ userName(note.user) }}</strong><time class="text-xs text-[#8a93a4]">{{ formatTimestamp(note.created) }}</time></div><div v-if="editingNoteId === note.id"><Textarea v-model="noteDraft" rows="3" class="w-full" /><div class="mt-3 flex justify-end gap-2"><Button type="button" label="Cancel" severity="secondary" text size="small" @click="editingNoteId = null" /><Button type="button" icon="pi pi-check" label="Save" size="small" :disabled="!noteDraft.trim()" :loading="entryBusy" @click="saveNoteEdit(note)" /></div></div><template v-else><p class="m-0 text-sm leading-6 text-[#505a6e]">{{ note.data }}</p><div class="mt-2 flex justify-end"><Button type="button" icon="pi pi-pencil" text rounded size="small" aria-label="Edit note" :disabled="entryBusy" @click="startNoteEdit(note)" /><Button type="button" icon="pi pi-trash" severity="danger" text rounded size="small" aria-label="Delete note" :disabled="entryBusy" @click="removeNote(note.id)" /></div></template></article></div>
+                <div class="relative ml-4 border-l border-[#dfe3ea] pl-6"><article v-for="note in activeJob.notes" :key="note.id" class="relative mb-4 rounded-xl border border-[#e3e7ee] bg-white p-4 last:mb-0"><span class="absolute top-5 -left-[2.05rem] grid h-4 w-4 place-items-center rounded-full border-4 border-white bg-[#6972ea]" /><div class="mb-2 flex flex-wrap items-center justify-between gap-2"><strong class="text-sm">{{ authorName(note.user) }}</strong><time class="text-xs text-[#8a93a4]">{{ formatTimestamp(note.created) }}</time></div><div v-if="editingNoteId === note.id"><Textarea v-model="noteDraft" rows="3" class="w-full" /><Select v-model="entryUserId" :options="entryUserOptions(note.user)" :option-label="authorName" option-value="id" filter placeholder="Created by" aria-label="Created by" class="mt-3 w-full" /><div class="mt-3 flex justify-end gap-2"><Button type="button" label="Cancel" severity="secondary" text size="small" @click="editingNoteId = null" /><Button type="button" icon="pi pi-check" label="Save" size="small" :disabled="!noteDraft.trim()" :loading="entryBusy" @click="saveNoteEdit(note)" /></div></div><template v-else><p class="m-0 text-sm leading-6 text-[#505a6e]">{{ note.data }}</p><div class="mt-2 flex justify-end"><Button type="button" icon="pi pi-pencil" text rounded size="small" aria-label="Edit note" :disabled="entryBusy" @click="startNoteEdit(note)" /><Button type="button" icon="pi pi-trash" severity="danger" text rounded size="small" aria-label="Delete note" :disabled="entryBusy" @click="removeNote(note.id)" /></div></template></article></div>
               </div>
   
               <div v-else-if="activeJobSection === 'items'">
                 <div class="mb-5 flex gap-3 rounded-2xl border border-[#e1e5ed] bg-[#fafbfc] p-4 max-[560px]:flex-col"><Select v-model="selectedServiceItem" :options="extraOptions" option-label="name" option-value="id" class="min-w-0 flex-1" :disabled="!activeJob.saved" :placeholder="extraOptions.length ? 'Select a service item' : 'No additional items for this property'" filter /><Button type="button" icon="pi pi-plus" label="Add item" :disabled="!activeJob.saved || !selectedServiceItem" :loading="entryBusy" @click="addServiceItem" /></div>
-                <div class="overflow-hidden rounded-xl border border-[#e2e6ed]"><div class="grid grid-cols-[1fr_80px_180px_44px] gap-3 border-b border-[#e7eaf0] bg-[#fafbfc] px-4 py-3 text-[.68rem] font-extrabold tracking-[.08em] text-[#80899a] uppercase max-[620px]:hidden"><span>Service item</span><span>List</span><span>Added by</span><span></span></div><template v-for="item in activeJob.extras" :key="item.id"><div v-if="editingExtraId === item.id" class="grid grid-cols-[1fr_130px_130px_auto] items-center gap-3 border-b border-[#edf0f4] bg-[#fafbfc] px-4 py-4 last:border-0 max-[620px]:grid-cols-2"><InputText v-model="extraDraft.name" aria-label="Item name" class="max-[620px]:col-span-2" /><InputNumber v-model="extraDraft.list" mode="currency" currency="USD" locale="en-US" :min="0" aria-label="List price" /><InputNumber v-model="extraDraft.cost" mode="currency" currency="USD" locale="en-US" :min="0" aria-label="Cost" /><span class="flex justify-end gap-2 max-[620px]:col-span-2"><Button type="button" label="Cancel" severity="secondary" text size="small" @click="editingExtraId = null" /><Button type="button" icon="pi pi-check" label="Save" size="small" :disabled="!extraDraft.name.trim()" :loading="entryBusy" @click="saveExtraEdit(item)" /></span></div><div v-else class="grid grid-cols-[1fr_80px_180px_44px] items-center gap-3 border-b border-[#edf0f4] px-4 py-4 last:border-0 max-[620px]:grid-cols-[1fr_auto]"><strong class="text-sm">{{ item.name }}</strong><span class="text-sm text-[#596276] max-[620px]:hidden">{{ money(item.list ?? 0) }}</span><span class="max-[620px]:col-start-1"><span class="block text-xs font-semibold text-[#596276]">{{ userName(item.user) }}</span><time class="mt-1 block text-[.7rem] text-[#8a93a4]">{{ formatTimestamp(item.created) }}</time></span><span class="flex"><Button type="button" icon="pi pi-pencil" text rounded size="small" aria-label="Edit item" :disabled="entryBusy" @click="startExtraEdit(item)" /><Button type="button" icon="pi pi-trash" severity="danger" text rounded size="small" aria-label="Remove item" :disabled="entryBusy" @click="removeServiceItem(item.id)" /></span></div></template></div>
+                <div class="overflow-hidden rounded-xl border border-[#e2e6ed]"><div class="grid grid-cols-[1fr_80px_180px_44px] gap-3 border-b border-[#e7eaf0] bg-[#fafbfc] px-4 py-3 text-[.68rem] font-extrabold tracking-[.08em] text-[#80899a] uppercase max-[620px]:hidden"><span>Service item</span><span>List</span><span>Added by</span><span></span></div><template v-for="item in activeJob.extras" :key="item.id"><div v-if="editingExtraId === item.id" class="grid grid-cols-[1fr_130px_130px_auto] items-center gap-3 border-b border-[#edf0f4] bg-[#fafbfc] px-4 py-4 last:border-0 max-[620px]:grid-cols-2"><InputText v-model="extraDraft.name" aria-label="Item name" class="max-[620px]:col-span-2" /><InputNumber v-model="extraDraft.list" mode="currency" currency="USD" locale="en-US" :min="0" aria-label="List price" /><InputNumber v-model="extraDraft.cost" mode="currency" currency="USD" locale="en-US" :min="0" aria-label="Cost" /><span class="flex justify-end gap-2 max-[620px]:col-span-2"><Button type="button" label="Cancel" severity="secondary" text size="small" @click="editingExtraId = null" /><Button type="button" icon="pi pi-check" label="Save" size="small" :disabled="!extraDraft.name.trim()" :loading="entryBusy" @click="saveExtraEdit(item)" /></span><Select v-model="entryUserId" :options="entryUserOptions(item.user)" :option-label="authorName" option-value="id" filter placeholder="Added by" aria-label="Added by" class="col-span-full" /></div><div v-else class="grid grid-cols-[1fr_80px_180px_44px] items-center gap-3 border-b border-[#edf0f4] px-4 py-4 last:border-0 max-[620px]:grid-cols-[1fr_auto]"><strong class="text-sm">{{ item.name }}</strong><span class="text-sm text-[#596276] max-[620px]:hidden">{{ money(item.list ?? 0) }}</span><span class="max-[620px]:col-start-1"><span class="block text-xs font-semibold text-[#596276]">{{ authorName(item.user) }}</span><time class="mt-1 block text-[.7rem] text-[#8a93a4]">{{ formatTimestamp(item.created) }}</time></span><span class="flex"><Button type="button" icon="pi pi-pencil" text rounded size="small" aria-label="Edit item" :disabled="entryBusy" @click="startExtraEdit(item)" /><Button type="button" icon="pi pi-trash" severity="danger" text rounded size="small" aria-label="Remove item" :disabled="entryBusy" @click="removeServiceItem(item.id)" /></span></div></template></div>
               </div>
   
               <div v-else-if="activeJobSection === 'attachments'">
                 <label class="mb-5 flex cursor-pointer items-center justify-center gap-3 rounded-xl border-2 border-dashed border-[#d6dbe6] bg-[#fafbfc] px-5 py-5 text-center hover:border-[#9ca3ed]"><input class="hidden" type="file" accept="image/*" multiple :disabled="!activeJob.saved || entryBusy" @change="handleAttachments"><span class="grid h-10 w-10 place-items-center rounded-full bg-[#eceeff] text-[#5962d8]"><i class="pi pi-camera" /></span><span class="text-left"><strong class="block text-sm">Upload technician photos</strong><small class="mt-1 block text-[#858e9f]">Images are saved straight away.</small></span></label>
-                <div class="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1"><article v-for="attachment in activeJob.attachments" :key="attachment.id" class="overflow-hidden rounded-xl border border-[#e1e5ec] bg-white"><div class="relative"><img v-if="isImage(attachment)" :src="attachmentSrc(attachment)" alt="Job attachment" class="h-44 w-full object-cover"><div v-else class="grid h-44 place-items-center bg-[#f3f5f8] text-[#8a93a4]"><i class="pi pi-file text-3xl" /></div></div><div class="p-4"><div class="flex items-center justify-between gap-3 text-xs text-[#7f8899]"><span><i class="pi pi-user mr-1" />{{ userName(attachment.user) }}</span><span class="flex items-center gap-1"><time>{{ formatTimestamp(attachment.created) }}</time><label :class="['inline-grid h-8 w-8 place-items-center rounded-full text-[#6972ea] hover:bg-[#eceeff]', entryBusy ? 'pointer-events-none opacity-50' : 'cursor-pointer']" title="Replace file" aria-label="Replace file"><i class="pi pi-pencil text-xs" /><input class="hidden" type="file" accept="image/*" :disabled="entryBusy" @change="replaceAttachment(attachment, $event)"></label><Button type="button" icon="pi pi-trash" severity="danger" text rounded size="small" aria-label="Delete attachment" :disabled="entryBusy" @click="removeAttachment(attachment.id)" /></span></div></div></article></div>
+                <div class="grid grid-cols-2 gap-4 max-[560px]:grid-cols-1"><article v-for="attachment in activeJob.attachments" :key="attachment.id" class="overflow-hidden rounded-xl border border-[#e1e5ec] bg-white"><div class="relative"><img v-if="isImage(attachment)" :src="attachmentSrc(attachment)" alt="Job attachment" class="h-44 w-full object-cover"><div v-else class="grid h-44 place-items-center bg-[#f3f5f8] text-[#8a93a4]"><i class="pi pi-file text-3xl" /></div></div><div class="p-4"><div class="flex items-center justify-between gap-3 text-xs text-[#7f8899]"><span v-if="editingAttachmentId === attachment.id" class="flex min-w-0 flex-1 items-center gap-1"><Select v-model="entryUserId" :options="entryUserOptions(attachment.user)" :option-label="authorName" option-value="id" filter placeholder="Added by" aria-label="Added by" class="min-w-0 flex-1" /><Button type="button" icon="pi pi-check" text rounded size="small" aria-label="Save user" :loading="entryBusy" @click="saveAttachmentUser(attachment)" /><Button type="button" icon="pi pi-times" severity="secondary" text rounded size="small" aria-label="Cancel" @click="editingAttachmentId = null" /></span><span v-else><i class="pi pi-user mr-1" />{{ authorName(attachment.user) }}<Button type="button" icon="pi pi-user-edit" text rounded size="small" aria-label="Change user" :disabled="entryBusy" @click="startAttachmentEdit(attachment)" /></span><span class="flex items-center gap-1"><time>{{ formatTimestamp(attachment.created) }}</time><label :class="['inline-grid h-8 w-8 place-items-center rounded-full text-[#6972ea] hover:bg-[#eceeff]', entryBusy ? 'pointer-events-none opacity-50' : 'cursor-pointer']" title="Replace file" aria-label="Replace file"><i class="pi pi-pencil text-xs" /><input class="hidden" type="file" accept="image/*" :disabled="entryBusy" @change="replaceAttachment(attachment, $event)"></label><Button type="button" icon="pi pi-trash" severity="danger" text rounded size="small" aria-label="Delete attachment" :disabled="entryBusy" @click="removeAttachment(attachment.id)" /></span></div></div></article></div>
               </div>
   
               <div v-else>
-                <div class="relative ml-5 border-l-2 border-[#e0e4eb] pl-7"><article v-for="change in statusChanges(activeJob)" :key="change.id" class="relative mb-6 last:mb-0"><span class="absolute top-0 -left-[2.34rem] grid h-5 w-5 place-items-center rounded-full border-4 border-white bg-[#6972ea] shadow-sm" /><div class="rounded-xl border border-[#e2e6ed] bg-white p-4"><div class="flex flex-wrap items-center gap-2"><span v-if="change.from" :class="['rounded-full px-2.5 py-1 text-[.7rem] font-bold', statusClass(change.from)]">{{ change.from }}</span><i v-if="change.from" class="pi pi-arrow-right text-[.65rem] text-[#9aa2af]" /><span :class="['rounded-full px-2.5 py-1 text-[.7rem] font-bold', statusClass(change.to)]">{{ change.to }}</span></div><div class="mt-3 flex flex-wrap items-center justify-between gap-2"><span class="text-xs font-semibold text-[#596276]">Changed by {{ userName(change.user) }}</span><time class="text-xs text-[#8a93a4]">{{ formatTimestamp(change.created) }}</time></div></div></article></div>
+                <div class="relative ml-5 border-l-2 border-[#e0e4eb] pl-7"><article v-for="change in statusChanges(activeJob)" :key="change.id" class="relative mb-6 last:mb-0"><span class="absolute top-0 -left-[2.34rem] grid h-5 w-5 place-items-center rounded-full border-4 border-white bg-[#6972ea] shadow-sm" /><div class="rounded-xl border border-[#e2e6ed] bg-white p-4"><div class="flex flex-wrap items-center gap-2"><span v-if="change.from" :class="['rounded-full px-2.5 py-1 text-[.7rem] font-bold', statusClass(change.from)]">{{ change.from }}</span><i v-if="change.from" class="pi pi-arrow-right text-[.65rem] text-[#9aa2af]" /><span :class="['rounded-full px-2.5 py-1 text-[.7rem] font-bold', statusClass(change.to)]">{{ change.to }}</span></div><div class="mt-3 flex flex-wrap items-center justify-between gap-2"><span class="text-xs font-semibold text-[#596276]">Changed by {{ authorName(change.user) }}</span><time class="text-xs text-[#8a93a4]">{{ formatTimestamp(change.created) }}</time></div></div></article></div>
               </div>
             </section>
   

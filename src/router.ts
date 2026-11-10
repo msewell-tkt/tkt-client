@@ -7,6 +7,9 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/login', name: 'login', component: LoginView },
+    { path: '/register', name: 'register', component: () => import('./views/RegisterView.vue') },
+    { path: '/register-tenant', name: 'register-tenant', component: () => import('./views/RegisterTenantView.vue') },
+    { path: '/register-tenant/verify', name: 'verify-tenant', component: () => import('./views/VerifyTenantView.vue') },
     { path: '/', name: 'home', component: HomeView, meta: { requiresAuth: true } },
     {
       path: '/scheduler',

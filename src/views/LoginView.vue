@@ -71,7 +71,9 @@
             </div>
           </form>
 
-          <p class="mt-6 mb-0 text-center text-xs text-[#7a8498] [&_i]:mr-[.35rem] [&_i]:text-[#5b63d3]"><i class="pi pi-lock" /> Your refresh session is stored in a protected browser cookie.</p>
+          <p class="mt-6 mb-0 text-center text-sm text-[#697386]">New here? <RouterLink class="font-semibold text-[#5962d8] hover:underline" :to="{ name: 'register-tenant' }">Create a workspace</RouterLink></p>
+
+          <p class="mt-4 mb-0 text-center text-xs text-[#7a8498] [&_i]:mr-[.35rem] [&_i]:text-[#5b63d3]"><i class="pi pi-lock" /> Your refresh session is stored in a protected browser cookie.</p>
         </template>
       </Card>
     </section>
@@ -79,26 +81,51 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onMounted, ref } from 'vue'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Password from 'primevue/password'
 import { auth } from '../auth'
+import { tenantService } from '../services/TenantService'
 
 const router = useRouter()
 const route = useRoute()
 const loading = ref(false)
 const resending = ref(false)
 const error = ref('')
-const email = ref('')
+// A registration link's follow-up arrives with the email filled in, and the PIN step open when one was emailed.
+const email = ref(typeof route.query.email === 'string' ? route.query.email : '')
 const pin = ref('')
-const pinRequested = ref(false)
+const pinRequested = ref(Boolean(email.value) && route.query.pinSent === '1')
 
-// Tenant comes from the login link (?tenantId=), then the redirect target's link,
-// then the tenant this browser last signed in to, then VITE_TENANT_ID for local development.
+/** The tenant label of the host (`acme` for acme.<VITE_APP_DOMAIN>), or '' on any other host. */
+function hostSubdomain(): string {
+  const domain = (import.meta.env.VITE_APP_DOMAIN ?? '').toLowerCase().replace(/^\./, '')
+  const host = window.location.hostname.toLowerCase()
+  if (!domain || !host.endsWith(`.${domain}`)) return ''
+  const label = host.slice(0, -domain.length - 1)
+  return label.includes('.') ? '' : label
+}
+
+// Set from the host's subdomain once the API has resolved it.
+const hostTenantId = ref('')
+onMounted(async () => {
+  const subdomain = hostSubdomain()
+  if (!subdomain) return
+  try {
+    const tenant = await tenantService.bySubdomain(subdomain)
+    if (tenant) hostTenantId.value = tenant.id
+    else error.value = 'We couldn’t find this workspace. Check the address you were given.'
+  } catch {
+    // fall back to the other tenant sources; sending a PIN reports a missing tenant
+  }
+})
+
+// Tenant comes from the login link (?tenantId=), then the redirect target's link, then the host's
+// subdomain, then the tenant this browser last signed in to, then VITE_TENANT_ID for local development.
 const tenantId = computed(() => {
   const direct = route.query.tenantId
   if (typeof direct === 'string' && direct) return direct
@@ -109,7 +136,7 @@ const tenantId = computed(() => {
     if (fromRedirect) return fromRedirect
   }
 
-  return auth.lastTenantId() ?? import.meta.env.VITE_TENANT_ID ?? ''
+  return hostTenantId.value || (auth.lastTenantId() ?? import.meta.env.VITE_TENANT_ID ?? '')
 })
 
 function requireTenantId(): string {

@@ -346,6 +346,35 @@ async function dropJob(resourceId: string, day: number, beforeId?: string) {
   }
 }
 
+/**
+ * A job dropped anywhere that isn't a schedulable cell (cells stop their own drops) goes back to the
+ * unscheduled queue: its team member and scheduled date are cleared via POST /scheduler/jobs/{id}/unschedule.
+ * Rolls back if the save fails.
+ */
+async function unscheduleDrop() {
+  const jobId = draggedJobId.value
+  draggedJobId.value = null
+  const item = jobs.value.find((candidate) => candidate.id === jobId)
+  if (!item?.source || item.saving || item.resourceId === null) return
+
+  const previous = { resourceId: item.resourceId, day: item.day, priority: item.priority, scheduled: item.source.scheduled }
+  item.resourceId = null
+  item.day = null
+  item.source.scheduled = null
+  item.saving = true
+  try {
+    await schedulerService.unscheduleJob(item.id)
+  } catch (reason) {
+    item.resourceId = previous.resourceId
+    item.day = previous.day
+    item.priority = previous.priority
+    item.source.scheduled = previous.scheduled
+    showNotice('error', reason instanceof Error ? reason.message : 'Unable to unschedule the job.')
+  } finally {
+    item.saving = false
+  }
+}
+
 function openJob(item: ScheduleItem) {
   if (!item.source) return
   selectedJob.value = item
@@ -424,7 +453,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="min-h-screen bg-[#f5f7fb]">
+  <div class="min-h-screen bg-[#f5f7fb]" @dragover.prevent @drop.prevent="unscheduleDrop">
     <AppHeader />
 
     <main class="px-[clamp(1rem,3vw,2.5rem)] pt-7 pb-12 max-[600px]:px-[.65rem] max-[600px]:pt-4 max-[600px]:pb-8">
@@ -475,7 +504,7 @@ onMounted(() => {
                 <span class="grid h-8 w-8 shrink-0 place-items-center rounded-[.6rem] bg-[#e9ebff] text-[.68rem] font-extrabold text-[#4e58c4]">{{ resource.name.split(' ').map((part) => part[0]).slice(0, 2).join('') }}</span>
                 <div class="min-w-0"><strong class="block overflow-hidden text-[.84rem] text-ellipsis whitespace-nowrap text-[#2d374b]">{{ resource.name }}</strong><small class="mt-1 block text-[.7rem] text-[#8a93a5]">{{ resource.roles.join(' · ') || 'Team member' }}</small></div>
               </div>
-              <div v-for="day in visibleDays" :key="`${resource.id}-${day}`" :class="['min-h-28 border-r border-b border-[#e2e6ed] p-[.38rem] transition-colors has-[.dragging]:bg-[#f0f2ff]', isToday(day) ? 'bg-[#fafaff]' : 'bg-white']" @dragover.prevent @drop.prevent="dropJob(resource.id, day)">
+              <div v-for="day in visibleDays" :key="`${resource.id}-${day}`" :class="['min-h-28 border-r border-b border-[#e2e6ed] p-[.38rem] transition-colors has-[.dragging]:bg-[#f0f2ff]', isToday(day) ? 'bg-[#fafaff]' : 'bg-white']" @dragover.prevent @drop.prevent.stop="dropJob(resource.id, day)">
                 <button
                   v-for="item in jobsFor(resource.id, day)" :key="item.id"
                   :class="jobClasses(item)"

@@ -70,7 +70,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
   }
 
   async requestPin(identity: TenantEmailRequest): Promise<void> {
-    const response = await this.post('/login/pin', identity, {
+    const response = await this.post('/api/v1/login/pin', identity, {
       authenticated: false,
       retryUnauthorized: false,
     })
@@ -80,7 +80,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
   }
 
   async login(credentials: LoginRequest): Promise<void> {
-    const token = await this.tokenRequest('/login', credentials)
+    const token = await this.tokenRequest('/api/v1/login', credentials)
     this.state.accessToken = token.accessToken
     this.state.initialized = true
     storeTenant(credentials.tenantId)
@@ -91,7 +91,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
 
     this.refreshPromise = (async () => {
       try {
-        const token = await this.tokenRequest('/auth/refresh')
+        const token = await this.tokenRequest('/api/v1/auth/refresh')
         this.state.accessToken = token.accessToken
         return true
       } catch {
@@ -116,7 +116,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
 
   async logout(): Promise<void> {
     try {
-      await this.delete('/auth/session', {
+      await this.delete('/api/v1/auth/session', {
         authenticated: false,
         retryUnauthorized: false,
       })

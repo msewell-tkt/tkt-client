@@ -1,9 +1,9 @@
 import { isClosedStatus } from '../constants/jobStatus'
 import type { WorkOrder } from '../services/WorkOrderService'
 
-export const jobCount = (order: Pick<WorkOrder, 'jobs'>) => order.jobs.length
+export const jobCount = (order: Pick<WorkOrder, 'jobs' | 'jobCount'>) => order.jobCount ?? order.jobs.length
 
-export const openJobCount = (order: Pick<WorkOrder, 'jobs'>) => order.jobs.filter((job) => !isClosedStatus(job.status)).length
+export const openJobCount = (order: Pick<WorkOrder, 'jobs' | 'openJobCount'>) => order.openJobCount ?? order.jobs.filter((job) => !isClosedStatus(job.status)).length
 
 /** `YYYY-MM-DD` dates are shown as calendar dates (UTC, no shift); ISO instants and `Date`s in the viewer's time zone. */
 export function formatDate(value: string | Date | null) {
