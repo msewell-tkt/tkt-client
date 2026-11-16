@@ -32,14 +32,24 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
-      - id: version
-        name: Resolve release version
-        env:
-          BUMP: ${{ inputs.bump }}
-          FORCE_NEW: ${{ inputs.force_rebuild }}
+      - name: Bump version
         run: |
-          FLOOR=$(node -p "require('./package.json').version")
-          .github/scripts/version.sh v prod "$FLOOR"
+          CURRENT=$(grep '^version=' gradle.properties | cut -d= -f2)
+          if ! [[ "$CURRENT" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+            echo "version in gradle.properties must look like 1.2.3, found '$CURRENT'"; exit 1
+          fi
+          MAJOR=${BASH_REMATCH[1]}; MINOR=${BASH_REMATCH[2]}; PATCH=${BASH_REMATCH[3]}
+          # every release increments the patch version
+          PATCH=$((PATCH+1))
+          NEXT="$MAJOR.$MINOR.$PATCH"
+          # refuse to reuse a version that was already released
+          if git ls-remote --exit-code --tags origin "refs/tags/v$NEXT" > /dev/null; then
+            echo "Tag v$NEXT already exists"; exit 1
+          fi
+          sed -i "s/^version=.*/version=$NEXT/" gradle.properties
+          echo "version=$NEXT" >> "$GITHUB_OUTPUT"
+          echo "label=tkt-core-$NEXT" >> "$GITHUB_OUTPUT"
+          echo "Releasing $NEXT (was $CURRENT)"
 
       - name: Build Application
         run: |
