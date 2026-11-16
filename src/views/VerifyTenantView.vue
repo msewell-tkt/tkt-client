@@ -20,7 +20,7 @@
           <h2 class="m-0 text-[1.8rem] tracking-[-.035em]">{{ result.tenantName }} is ready</h2>
           <p v-if="result.existingUser" class="mt-[.7rem] mb-6 leading-6 text-[#697386]">Your existing account is now the administrator of this workspace. Sign in with a PIN to get started, then invite your team from the Users page.</p>
           <p v-else class="mt-[.7rem] mb-6 leading-6 text-[#697386]">We sent a PIN to <strong>{{ result.email }}</strong>. Enter it on the sign-in page, then invite your team from the Users page.</p>
-          <Button :label="`Continue to ${new URL(result.loginUrl).host}`" icon="pi pi-arrow-right" icon-pos="right" fluid @click="goToLogin" />
+          <Button :label="`Continue to ${loginHost(result.loginUrl)}`" icon="pi pi-arrow-right" icon-pos="right" fluid @click="goToLogin" />
         </template>
 
         <template v-else-if="registration">
@@ -76,6 +76,10 @@ async function confirm() {
   } finally {
     submitting.value = false
   }
+}
+
+function loginHost(loginUrl: string) {
+  return new URL(loginUrl).host
 }
 
 function goToLogin() {
