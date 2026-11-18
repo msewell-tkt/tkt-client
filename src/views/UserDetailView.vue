@@ -12,8 +12,12 @@ import ToggleSwitch from 'primevue/toggleswitch'
 import AppHeader from '../components/AppHeader.vue'
 import { userColor, userInitials, userName, userRoleNames, userStatus, type User, type UserStatus } from '../services/User'
 import { propertyService } from '../services/PropertyService'
+import { dashboardService } from '../services/DashboardService'
+import { tenantService, type TenantSummary } from '../services/TenantService'
 import { userService, type Role, type UserProperty, type UserType } from '../services/UserService'
 import { formatTimestamp } from '../utils/workOrderFormat'
+
+const SUPER_ADMIN = 'Super Admin'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,6 +27,10 @@ const allProperties = ref<UserProperty[]>([])
 const linked = ref<UserProperty[]>([])
 const allUserTypes = ref<UserType[]>([])
 const userTypes = ref<UserType[]>([])
+const allTenants = ref<TenantSummary[]>([])
+const userTenants = ref<TenantSummary[]>([])
+const currentTenantId = ref('')
+const isSuperAdmin = ref(false)
 const loading = ref(true)
 const loadError = ref('')
 const actionError = ref('')
@@ -32,6 +40,9 @@ const removeOpen = ref(false)
 onMounted(async () => {
   try {
     const matches = (item: User) => item.id === route.params.id
+    const session = await dashboardService.load()
+    isSuperAdmin.value = session.roles.includes(SUPER_ADMIN)
+    currentTenantId.value = session.tid
     const found = (await userService.list()).find(matches) ?? (await userService.list(true)).find(matches) ?? null
     user.value = found
     if (!found) return
@@ -40,6 +51,7 @@ onMounted(async () => {
     linked.value = properties
     allUserTypes.value = types
     userTypes.value = mine
+    if (isSuperAdmin.value) [allTenants.value, userTenants.value] = await Promise.all([tenantService.list(), userService.tenantsOf(found.id)])
     allProperties.value = view.properties.flatMap((item) => (item.id && !item.archived ? [{ id: item.id, name: item.name }] : []))
   } catch (reason) {
     loadError.value = reason instanceof Error ? reason.message : 'Couldn’t load the user.'
@@ -77,6 +89,27 @@ const roleIds = computed({
     }, 'Unable to change the roles.')
   },
 })
+
+/** Only a Super Admin can hand out the Super Admin role; Admins hand out the rest. */
+const roleOptions = computed(() => tenantRoles.value.map((role) => ({ ...role, locked: role.name === SUPER_ADMIN && !isSuperAdmin.value })))
+
+const tenantIds = computed({
+  get: () => userTenants.value.map((item) => item.id),
+  set: (ids: string[]) => {
+    const current = user.value
+    if (!current) return
+    const have = new Set(userTenants.value.map((item) => item.id))
+    const added = ids.filter((id) => !have.has(id))
+    const removed = [...have].filter((id) => !ids.includes(id))
+    void change(async () => {
+      for (const id of added) await userService.associateWithTenant(current.id, id)
+      for (const id of removed) await userService.dissociateFromTenant(current.id, id)
+      userTenants.value = allTenants.value.filter((item) => ids.includes(item.id))
+    }, 'Unable to change the workspaces.')
+  },
+})
+
+const tenantOptions = computed(() => allTenants.value.map((item) => ({ ...item, locked: item.id === currentTenantId.value })))
 
 const propertyIds = computed({
   get: () => linked.value.map((item) => item.id),
@@ -206,7 +239,12 @@ function statusSeverity(value: UserStatus) {
 
             <section class="rounded-2xl border border-[#e2e6ef] bg-white p-6 shadow-[0_10px_30px_rgba(30,41,75,.04)]">
               <div class="mb-4"><h2 class="m-0 text-lg tracking-[-.02em]">Roles</h2><p class="mt-1 mb-0 text-sm text-[#7d8698]">What this user can do in your workspace.</p></div>
-              <MultiSelect v-model="roleIds" :options="tenantRoles" option-label="name" option-value="id" display="chip" placeholder="No roles assigned" class="w-full" :disabled="busy" />
+              <MultiSelect v-model="roleIds" :options="roleOptions" option-label="name" option-value="id" option-disabled="locked" display="chip" placeholder="No roles assigned" class="w-full" :disabled="busy" />
+            </section>
+
+            <section v-if="isSuperAdmin" class="rounded-2xl border border-[#e2e6ef] bg-white p-6 shadow-[0_10px_30px_rgba(30,41,75,.04)]">
+              <div class="mb-4"><h2 class="m-0 text-lg tracking-[-.02em]">Workspaces</h2><p class="mt-1 mb-0 text-sm text-[#7d8698]">Every workspace this user can sign in to. Use “Remove from workspace” to leave this one. Roles in another workspace are set from within it.</p></div>
+              <MultiSelect v-model="tenantIds" :options="tenantOptions" option-label="name" option-value="id" option-disabled="locked" display="chip" filter placeholder="No workspaces" class="w-full" :disabled="busy" />
             </section>
 
             <section class="rounded-2xl border border-[#e2e6ef] bg-white p-6 shadow-[0_10px_30px_rgba(30,41,75,.04)]">

@@ -1,6 +1,7 @@
 import { BaseApiService, type ApiAuthentication } from './BaseApiService'
 import { auth } from '../auth'
 import type { User } from './User'
+import type { TenantSummary } from './TenantService'
 
 /** A role of the tenant, as `GET /api/roles` returns it. */
 export interface Role {
@@ -96,6 +97,22 @@ class UserService extends BaseApiService {
 
   removeRole(userId: string, roleId: string): Promise<void> {
     return this.send(this.delete(`/api/v1/users/${userId}/roles/${roleId}`), 'Unable to remove the role.')
+  }
+
+  /** The tenants a user belongs to (`GET /users/{id}/tenants`). Super Admin only. */
+  async tenantsOf(userId: string): Promise<TenantSummary[]> {
+    const payload = await this.data<TenantSummary[] | null>(await this.get(`/api/v1/users/${userId}/tenants`), 'Couldn’t load the user’s workspaces.')
+    return Array.isArray(payload) ? payload : []
+  }
+
+  /** Adds the user to any tenant (`POST /tenants/{tenantId}/users/{userId}`). Super Admin only; repeating it is harmless. */
+  associateWithTenant(userId: string, tenantId: string): Promise<void> {
+    return this.send(this.post(`/api/v1/tenants/${tenantId}/users/${userId}`), 'Unable to add the user to the workspace.')
+  }
+
+  /** Removes the user from any tenant. Super Admin only. */
+  dissociateFromTenant(userId: string, tenantId: string): Promise<void> {
+    return this.send(this.delete(`/api/v1/tenants/${tenantId}/users/${userId}`), 'Unable to remove the user from the workspace.')
   }
 
   /** Adds an existing user to the tenant. */

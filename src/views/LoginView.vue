@@ -17,20 +17,50 @@
     <section class="grid min-h-screen place-items-center bg-linear-to-br from-[#fafbfe] to-[#f1f3f9] p-4 min-[581px]:p-8 min-[861px]:min-h-0">
       <Card class="w-full max-w-[470px] rounded-[1.25rem] border border-[#e6e9f2] shadow-[0_25px_70px_rgba(21,30,59,.1)] [&_.p-card-body]:p-[clamp(1.5rem,4vw,2.6rem)]">
         <template #content>
+          <TenantLogo v-if="tenantId && hostState !== 'unknown'" :tenant-id="tenantId" alt="Workspace logo" img-class="mb-6 block max-h-16 w-auto max-w-[14rem] object-contain" />
+          <template v-if="hostState === 'unknown'">
+            <div class="mb-6 grid h-12 w-12 place-items-center rounded-full bg-[#f0f2f7] text-[#7e8799]"><i class="pi pi-compass text-xl" /></div>
+            <h2 class="m-0 text-[1.6rem] tracking-[-.035em]">We can’t find this workspace</h2>
+            <p class="mt-[.7rem] mb-6 leading-6 text-[#697386]">There is no workspace at <strong class="font-mono">{{ hostName }}</strong>. Check the address you were given, or ask your administrator for the right link.</p>
+            <div class="flex flex-wrap gap-3">
+              <a :href="platformUrl()" class="inline-flex"><Button label="Go to Turnkey Tracker" icon="pi pi-arrow-right" icon-pos="right" severity="secondary" outlined /></a>
+              <RouterLink :to="{ name: 'register-tenant' }" class="inline-flex"><Button label="Create a workspace" text /></RouterLink>
+            </div>
+          </template>
+          <div v-else-if="hostState === 'checking'" class="grid place-items-center py-10"><ProgressSpinner stroke-width="4" class="!h-9 !w-9" aria-label="Checking this address" /></div>
+          <template v-else>
           <div class="mb-8 flex items-center gap-[.8rem] min-[861px]:hidden">
             <div class="grid h-[2.2rem] w-[2.2rem] place-items-center rounded-[.85rem] bg-[#6972ea] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></div>
             <strong>Turnkey Tracker</strong>
           </div>
           <div>
             <p class="mb-[.65rem] text-xs font-extrabold tracking-[.12em] text-[#5b63d3] uppercase">Welcome back</p>
-            <h2 class="m-0 text-[1.8rem] tracking-[-.035em]">{{ pinRequested ? 'Check your email' : 'Sign in to your workspace' }}</h2>
-            <p v-if="pinRequested" class="mt-[.7rem] mb-[1.8rem] leading-6 text-[#697386]">We sent a PIN to <strong>{{ email }}</strong>.</p>
+            <h2 class="m-0 text-[1.8rem] tracking-[-.035em]">{{ tenantChoices.length ? 'Choose a workspace' : pinRequested ? 'Check your email' : 'Sign in to your workspace' }}</h2>
+            <p v-if="tenantChoices.length" class="mt-[.7rem] mb-[1.8rem] leading-6 text-[#697386]">Your account belongs to more than one workspace. Which would you like to use?</p>
+            <p v-else-if="pinRequested" class="mt-[.7rem] mb-[1.8rem] leading-6 text-[#697386]">We sent a PIN to <strong>{{ email }}</strong>.</p>
             <p v-else class="mt-[.7rem] mb-[1.8rem] leading-6 text-[#697386]">Enter your email and we’ll send you a one-time PIN.</p>
           </div>
 
+          <Message v-if="otherSessionTenant" severity="info" :closable="false" class="mb-4">This browser is signed in to <strong>{{ otherSessionTenant }}</strong>, a different workspace. Sign in below to use this one instead.</Message>
           <Message v-if="error" severity="error" :closable="false">{{ error }}</Message>
 
-          <form v-if="!pinRequested" class="mt-5 grid gap-5" @submit.prevent="sendPin">
+          <form v-if="tenantChoices.length" class="mt-5 grid gap-5" @submit.prevent="signIn()">
+            <div class="grid gap-2" role="radiogroup" aria-label="Workspace">
+              <label
+                v-for="option in tenantChoices"
+                :key="option.id"
+                class="flex cursor-pointer items-center gap-3 rounded-xl border border-[#e6e9f2] p-3 has-[:checked]:border-[#5b63d3] has-[:checked]:bg-[#f3f4ff]"
+              >
+                <input v-model="selectedTenantId" type="radio" name="tenant" :value="option.id" class="accent-[#5b63d3]" required />
+                <span class="grid"><strong>{{ option.name }}</strong><span class="text-xs text-[#697386]">{{ option.subdomain }}</span></span>
+              </label>
+            </div>
+
+            <Button type="submit" label="Continue" icon="pi pi-arrow-right" icon-pos="right" :loading="loading" :disabled="!selectedTenantId" fluid />
+            <Button type="button" label="Back" severity="secondary" variant="text" size="small" @click="changeEmail" />
+          </form>
+
+          <form v-else-if="!pinRequested" class="mt-5 grid gap-5" @submit.prevent="sendPin">
             <div class="grid gap-2">
               <label class="text-sm font-bold text-[#323b50]" for="email">Email address</label>
               <InputText
@@ -47,7 +77,7 @@
             <Button type="submit" label="Email me a PIN" icon="pi pi-arrow-right" icon-pos="right" :loading="loading" fluid />
           </form>
 
-          <form v-else class="mt-5 grid gap-5" @submit.prevent="signIn">
+          <form v-else class="mt-5 grid gap-5" @submit.prevent="verifyPin">
             <div class="grid gap-2">
               <label class="text-sm font-bold text-[#323b50]" for="pin">PIN</label>
               <Password
@@ -74,6 +104,7 @@
           <p class="mt-6 mb-0 text-center text-sm text-[#697386]">New here? <RouterLink class="font-semibold text-[#5962d8] hover:underline" :to="{ name: 'register-tenant' }">Create a workspace</RouterLink></p>
 
           <p class="mt-4 mb-0 text-center text-xs text-[#7a8498] [&_i]:mr-[.35rem] [&_i]:text-[#5b63d3]"><i class="pi pi-lock" /> Your refresh session is stored in a protected browser cookie.</p>
+          </template>
         </template>
       </Card>
     </section>
@@ -88,8 +119,11 @@ import Card from 'primevue/card'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import Password from 'primevue/password'
-import { auth } from '../auth'
-import { tenantService } from '../services/TenantService'
+import ProgressSpinner from 'primevue/progressspinner'
+import { auth, type TenantOption } from '../auth'
+import TenantLogo from '../components/TenantLogo.vue'
+import { hostLookupFailed, hostSubdomain, platformUrl, resolveHostTenant } from '../hostTenant'
+import { loadSession, resetSession, sessionMatchesHost } from '../session'
 
 const router = useRouter()
 const route = useRoute()
@@ -101,26 +135,26 @@ const email = ref(typeof route.query.email === 'string' ? route.query.email : ''
 const pin = ref('')
 const pinRequested = ref(Boolean(email.value) && route.query.pinSent === '1')
 
-/** The tenant label of the host (`acme` for acme.<VITE_APP_DOMAIN>), or '' on any other host. */
-function hostSubdomain(): string {
-  const domain = (import.meta.env.VITE_APP_DOMAIN ?? '').toLowerCase().replace(/^\./, '')
-  const host = window.location.hostname.toLowerCase()
-  if (!domain || !host.endsWith(`.${domain}`)) return ''
-  const label = host.slice(0, -domain.length - 1)
-  return label.includes('.') ? '' : label
-}
-
+// What this address is: no tenant (the app's own host, localhost), still being looked up, a tenant's, or one nobody
+// uses. An unknown one is a dead end: no sign-in, and no other tenant's logo or remembered tenant is offered.
+const hostState = ref<'none' | 'checking' | 'known' | 'unknown' | 'failed'>(hostSubdomain() ? 'checking' : 'none')
+const hostName = window.location.hostname
 // Set from the host's subdomain once the API has resolved it.
 const hostTenantId = ref('')
+// The tenant of a session this browser still holds, when it is not this address's tenant.
+const otherSessionTenant = ref('')
 onMounted(async () => {
-  const subdomain = hostSubdomain()
-  if (!subdomain) return
-  try {
-    const tenant = await tenantService.bySubdomain(subdomain)
-    if (tenant) hostTenantId.value = tenant.id
-    else error.value = 'We couldn’t find this workspace. Check the address you were given.'
-  } catch {
-    // fall back to the other tenant sources; sending a PIN reports a missing tenant
+  if (!hostSubdomain()) return
+  const tenant = await resolveHostTenant()
+  if (!tenant) {
+    // A failed lookup falls back to the other tenant sources; sending a PIN reports a missing tenant.
+    hostState.value = hostLookupFailed() ? 'failed' : 'unknown'
+    return
+  }
+  hostState.value = 'known'
+  hostTenantId.value = tenant.id
+  if (auth.isAuthenticated.value && !(await sessionMatchesHost())) {
+    otherSessionTenant.value = (await loadSession()).tenantName
   }
 })
 
@@ -157,11 +191,35 @@ async function sendPin() {
   }
 }
 
-async function signIn() {
+// Set when the PIN checks out for a user with several tenants; the user picks one to finish signing in.
+const tenantChoices = ref<TenantOption[]>([])
+const selectedTenantId = ref('')
+
+async function verifyPin() {
   loading.value = true
   error.value = ''
   try {
-    await auth.login({ email: email.value, tenantId: requireTenantId(), pin: pin.value })
+    const choices = await auth.tenantChoices(email.value, pin.value)
+    if (choices.length > 1) {
+      tenantChoices.value = choices
+      selectedTenantId.value = choices.find((choice) => choice.id === tenantId.value)?.id ?? ''
+      return
+    }
+    await signIn(choices[0]?.id)
+  } catch (reason) {
+    error.value = reason instanceof Error ? reason.message : 'Unable to sign in.'
+  } finally {
+    loading.value = false
+  }
+}
+
+async function signIn(singleTenantId?: string) {
+  loading.value = true
+  error.value = ''
+  try {
+    const chosen = singleTenantId ?? (selectedTenantId.value || requireTenantId())
+    await auth.login({ email: email.value, tenantId: chosen, pin: pin.value })
+    resetSession()
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
     await router.replace(redirect)
   } catch (reason) {
@@ -184,6 +242,8 @@ async function resendPin() {
 }
 
 function changeEmail() {
+  tenantChoices.value = []
+  selectedTenantId.value = ''
   pin.value = ''
   pinRequested.value = false
   error.value = ''

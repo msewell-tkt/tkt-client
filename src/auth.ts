@@ -16,6 +16,13 @@ interface LoginRequest extends TenantEmailRequest {
   pin: string
 }
 
+/** A tenant the user can sign in to (`POST /api/v1/login/tenants`). */
+interface TenantOption {
+  id: string
+  name: string
+  subdomain: string
+}
+
 const TENANT_STORAGE_KEY = 'tkt-last-tenant-id'
 
 function readStoredTenant(): string | null {
@@ -77,6 +84,22 @@ class AuthService extends BaseApiService implements ApiAuthentication {
     if (!response.ok) {
       throw new Error(await this.errorMessage(response, 'Unable to send a PIN. Please try again.'))
     }
+  }
+
+  /** Verifies the PIN and lists the tenants the user belongs to. Creates no session; finish with `login`. */
+  async tenantChoices(email: string, pin: string): Promise<TenantOption[]> {
+    const response = await this.post('/api/v1/login/tenants', { email, pin }, {
+      authenticated: false,
+      retryUnauthorized: false,
+    })
+    if (!response.ok) {
+      throw new Error(await this.errorMessage(
+        response,
+        response.status === 401 ? 'The PIN you entered is incorrect.' : 'Authentication failed.',
+      ))
+    }
+    const body = await this.json<{ tenants?: TenantOption[] }>(response)
+    return Array.isArray(body.tenants) ? body.tenants : []
   }
 
   async login(credentials: LoginRequest): Promise<void> {
@@ -143,4 +166,4 @@ class AuthService extends BaseApiService implements ApiAuthentication {
 
 export const auth = new AuthService()
 
-export type { LoginRequest, TenantEmailRequest }
+export type { LoginRequest, TenantEmailRequest, TenantOption }

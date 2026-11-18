@@ -1,5 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { auth } from './auth'
+import { isSuperAdmin, sessionMatchesHost } from './session'
+import { resolveHostTenant } from './hostTenant'
 import HomeView from './views/HomeView.vue'
 import LoginView from './views/LoginView.vue'
 
@@ -41,6 +43,18 @@ const router = createRouter({
       component: () => import('./views/UserDetailView.vue'),
       meta: { requiresAuth: true },
     },
+    {
+      path: '/tenants',
+      name: 'tenants',
+      component: () => import('./views/TenantsView.vue'),
+      meta: { requiresAuth: true, requiresSuperAdmin: true },
+    },
+    {
+      path: '/tenants/:id',
+      name: 'tenant-detail',
+      component: () => import('./views/TenantDetailView.vue'),
+      meta: { requiresAuth: true, requiresSuperAdmin: true },
+    },
   ],
 })
 
@@ -53,7 +67,18 @@ router.beforeEach(async (to) => {
   if (to.meta.requiresAuth && !auth.isAuthenticated.value) {
     return { name: 'login', query: { redirect: to.fullPath, tenantId: loginTenantId(to.query) } }
   }
+  // A session of another tenant (restored by the shared refresh cookie) must not be used at this tenant's address:
+  // send the user to this tenant's sign-in instead, which says what happened.
+  if (auth.isAuthenticated.value && !(await sessionMatchesHost())) {
+    if (to.meta.requiresAuth) {
+      const host = await resolveHostTenant()
+      return { name: 'login', query: { redirect: to.fullPath, tenantId: host?.id } }
+    }
+    return
+  }
   if (to.name === 'login' && auth.isAuthenticated.value) return { name: 'home' }
+  // The API enforces this too; the check just keeps everyone else off pages that would only show errors.
+  if (to.meta.requiresSuperAdmin && !(await isSuperAdmin())) return { name: 'home' }
 })
 
 // A protected request that still gets 401 after a refresh attempt lands here, from any view.

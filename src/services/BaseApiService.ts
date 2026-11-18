@@ -20,6 +20,8 @@ export abstract class BaseApiService {
   }
 
   protected post(path: string, body?: unknown, options?: RequestOptions): Promise<Response> {
+    // A FormData body is sent as is: the browser adds the multipart content type and its boundary.
+    if (body instanceof FormData) return this.request(path, { method: 'POST', body }, options)
     return this.request(path, {
       method: 'POST',
       headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
@@ -88,7 +90,8 @@ export abstract class BaseApiService {
     return response
   }
 
-  private url(path: string): string {
+  /** The full URL of an API path, for things the browser loads itself (such as an `<img>`). */
+  protected url(path: string): string {
     if (/^https?:\/\//.test(path)) return path
     return `${this.baseUrl}${path.startsWith('/') ? path : `/${path}`}`
   }
