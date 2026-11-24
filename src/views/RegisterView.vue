@@ -3,7 +3,7 @@
     <Card class="w-full max-w-[520px] rounded-[1.25rem] border border-[#e6e9f2] shadow-[0_25px_70px_rgba(21,30,59,.1)] [&_.p-card-body]:p-[clamp(1.5rem,4vw,2.6rem)]">
       <template #content>
         <div class="mb-8 flex items-center gap-[.8rem]">
-          <div class="grid h-[2.2rem] w-[2.2rem] place-items-center rounded-[.85rem] bg-[#6972ea] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></div>
+          <img src="https://static.turnkeytracker.com/images/logo.png" alt="" class="h-[2.2rem] w-[2.2rem] object-contain" />
           <strong>Turnkey Tracker</strong>
         </div>
 

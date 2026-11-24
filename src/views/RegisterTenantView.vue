@@ -1,7 +1,7 @@
 <template>
   <main class="grid min-h-screen grid-cols-1 bg-white min-[861px]:grid-cols-[minmax(380px,.9fr)_minmax(520px,1.1fr)]">
     <section class="relative hidden flex-col justify-center overflow-hidden bg-[radial-gradient(circle_at_10%_10%,#5b63d3_0,transparent_38%),linear-gradient(145deg,#10172b,#19244a_62%,#252e68)] p-[clamp(3rem,7vw,7rem)] text-white after:absolute after:right-[-10rem] after:bottom-[-12rem] after:h-[32rem] after:w-[32rem] after:rounded-full after:border after:border-white/12 after:content-[''] after:shadow-[0_0_0_5rem_rgba(255,255,255,.025),0_0_0_10rem_rgba(255,255,255,.02)] min-[861px]:flex">
-      <div class="mb-7 grid h-11 w-11 place-items-center rounded-[.85rem] bg-[#6972ea] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></div>
+      <img src="https://static.turnkeytracker.com/images/logo.png" alt="" class="mb-7 h-11 w-11 object-contain" />
       <p class="mb-[.65rem] text-xs font-extrabold tracking-[.12em] text-[#aeb5ff] uppercase">Turnkey Tracker</p>
       <h1 class="m-0 max-w-[580px] text-[clamp(2.7rem,5vw,5rem)] leading-[.98] tracking-[-.055em]">Set up your workspace.</h1>
       <p class="my-7 mb-10 max-w-[520px] text-[1.08rem] leading-7 text-[#c7cee8]">
@@ -18,7 +18,7 @@
       <Card class="w-full max-w-[540px] rounded-[1.25rem] border border-[#e6e9f2] shadow-[0_25px_70px_rgba(21,30,59,.1)] [&_.p-card-body]:p-[clamp(1.5rem,4vw,2.6rem)]">
         <template #content>
           <div class="mb-8 flex items-center gap-[.8rem] min-[861px]:hidden">
-            <div class="grid h-[2.2rem] w-[2.2rem] place-items-center rounded-[.85rem] bg-[#6972ea] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></div>
+            <img src="https://static.turnkeytracker.com/images/logo.png" alt="" class="h-[2.2rem] w-[2.2rem] object-contain" />
             <strong>Turnkey Tracker</strong>
           </div>
 

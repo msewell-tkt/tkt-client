@@ -170,7 +170,7 @@ const tenantId = computed(() => {
     if (fromRedirect) return fromRedirect
   }
 
-  return hostTenantId.value || (auth.lastTenantId() ?? import.meta.env.VITE_TENANT_ID ?? '')
+  return hostTenantId.value || (auth.lastTenantId() ?? '')
 })
 
 function requireTenantId(): string {
