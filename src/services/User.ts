@@ -1,3 +1,5 @@
+import type { RoleEnum } from '../constants/roles'
+
 /** A user as the API returns it (`User` in tkt-core). */
 export interface User {
   id: string
@@ -20,7 +22,7 @@ export interface User {
   lastLogin?: string | null
   created?: string | null
   /** The user's roles in the tenant. */
-  roles?: Array<{ id: string; name: string }> | null
+  roles?: RoleEnum[] | null
 }
 
 export type UserStatus = 'Active' | 'Invited' | 'Inactive' | 'Archived'
@@ -35,7 +37,7 @@ const AVATAR_COLORS = ['#5962d8', '#0f9279', '#b87417', '#a04f80', '#34789b', '#
 /** A steady avatar color for the user, picked from their id. */
 export const userColor = (user: User) => AVATAR_COLORS[[...user.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) % AVATAR_COLORS.length]
 
-export const userRoleNames = (user: User) => (user.roles ?? []).map((role) => role.name)
+export const userRoleNames = (user: User): string[] => user.roles ?? []
 
 /** The user's full name, or an empty string when there is no user or no name. */
 export function userName(user: User | null | undefined) {

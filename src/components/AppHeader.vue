@@ -2,11 +2,11 @@
   <header class="sticky top-0 z-10 flex h-[68px] items-center justify-between gap-3 border-b border-[#e4e7ee] bg-white/90 px-[clamp(1rem,4vw,3.5rem)] backdrop-blur-2xl">
     <RouterLink class="flex shrink-0 items-center gap-3 font-extrabold tracking-[-.02em]" to="/">
       <TenantLogo v-if="tenantId" :tenant-id="tenantId" :alt="tenantName" img-class="block h-9 max-h-9 w-auto max-w-[9rem] object-contain">
-        <span class="grid h-8 w-8 place-items-center rounded-[.6rem] bg-[#6972ea] text-[.8rem] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></span>
+        <img src="https://static.turnkeytracker.com/images/logo.png" alt="" class="block h-8 w-auto object-contain" />
         <span class="max-[520px]:hidden">Turnkey Tracker</span>
       </TenantLogo>
       <template v-else>
-        <span class="grid h-8 w-8 place-items-center rounded-[.6rem] bg-[#6972ea] text-[.8rem] text-white shadow-[0_12px_30px_rgba(71,80,190,.35)]"><i class="pi pi-bolt" /></span>
+        <img src="https://static.turnkeytracker.com/images/logo.png" alt="" class="block h-8 w-auto object-contain" />
         <span class="max-[520px]:hidden">Turnkey Tracker</span>
       </template>
     </RouterLink>
@@ -45,7 +45,8 @@ import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import { auth } from '../auth'
-import { loadSession, SUPER_ADMIN_ROLE } from '../session'
+import { RoleEnum } from '../constants/roles'
+import { loadSession } from '../session'
 import TenantLogo from './TenantLogo.vue'
 
 const links = [
@@ -62,7 +63,7 @@ const tenantName = ref('')
 onMounted(async () => {
   try {
     const session = await loadSession()
-    superAdmin.value = session.roles.includes(SUPER_ADMIN_ROLE)
+    superAdmin.value = session.roles.includes(RoleEnum.SUPER_ADMIN)
     tenantId.value = session.tid
     tenantName.value = session.tenantName
   } catch {

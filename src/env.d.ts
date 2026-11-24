@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  /** Base URL of the tkt-core API, e.g. http://localhost:2112. Empty means same origin. */
+  /** Base URL of the tkt-core API including its version, e.g. http://localhost:2112/api/v1. Every service path is appended to it. */
   readonly VITE_API_BASE_URL?: string
   /** Optional tenant used when the login URL carries no tenantId (local development). */
   readonly VITE_TENANT_ID?: string

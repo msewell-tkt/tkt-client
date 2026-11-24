@@ -1,9 +1,8 @@
 import { watch } from 'vue'
 import { auth } from './auth'
+import { RoleEnum } from './constants/roles'
 import { hostLookupFailed, hostSubdomain, resolveHostTenant } from './hostTenant'
 import { dashboardService, type Session } from './services/DashboardService'
-
-export const SUPER_ADMIN_ROLE = 'Super Admin'
 
 let cached: Promise<Session> | null = null
 
@@ -48,7 +47,7 @@ export async function sessionMatchesHost(): Promise<boolean> {
 
 export async function isSuperAdmin(): Promise<boolean> {
   try {
-    return (await loadSession()).roles.includes(SUPER_ADMIN_ROLE)
+    return (await loadSession()).roles.includes(RoleEnum.SUPER_ADMIN)
   } catch {
     return false
   }

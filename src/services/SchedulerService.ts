@@ -1,12 +1,8 @@
 import { BaseApiService, type ApiAuthentication } from './BaseApiService'
 import { auth } from '../auth'
+import type { RoleEnum } from '../constants/roles'
 
 /** Shapes returned by tkt-core `GET /scheduler/weekly` (only the fields the client reads). */
-export interface ScheduleRole {
-  id: string
-  name: string
-}
-
 /** A tenant user type (e.g. Painter), the value of the weekly endpoint's `userType` filter. */
 export interface UserType {
   id: string
@@ -52,7 +48,7 @@ export interface ScheduleUser {
   firstName: string | null
   lastName: string | null
   image: string | null
-  roles: ScheduleRole[] | null
+  roles: RoleEnum[] | null
   workOrderJobs: ScheduleJob[] | null
 }
 
@@ -94,7 +90,7 @@ class SchedulerService extends BaseApiService {
     })
     if (userType) params.set('userType', userType)
     const payload = await this.data<ScheduleUser[] | null>(
-      await this.get(`/api/v1/scheduler/weekly?${params}`),
+      await this.get(`/scheduler/weekly?${params}`),
       'Couldn’t load the schedule.',
     )
     return Array.isArray(payload) ? payload : []
@@ -102,14 +98,14 @@ class SchedulerService extends BaseApiService {
 
   /** User types of the tenant, sorted by name (`GET /api/user-types`). */
   async userTypes(): Promise<UserType[]> {
-    const payload = await this.data<UserType[] | null>(await this.get('/api/v1/user-types'), 'Couldn’t load user types.')
+    const payload = await this.data<UserType[] | null>(await this.get('/user-types'), 'Couldn’t load user types.')
     return Array.isArray(payload) ? payload : []
   }
 
   /** Moves a job to another day, team member or position. Requires the Admin or Super Admin role. */
   async moveJob(jobId: string, move: JobMove): Promise<JobMoveResult> {
     return this.data<JobMoveResult>(
-      await this.put(`/api/v1/scheduler/jobs/${jobId}`, {
+      await this.put(`/scheduler/jobs/${jobId}`, {
         assignedTo: move.assignedTo,
         scheduled: move.scheduled.getTime(),
         priority: move.priority,
@@ -121,7 +117,7 @@ class SchedulerService extends BaseApiService {
 
   /** Returns a job to the unscheduled queue: clears its date and team member (`POST /scheduler/jobs/{jobId}/unschedule`). Requires the Admin or Super Admin role. */
   async unscheduleJob(jobId: string): Promise<void> {
-    const response = await this.post(`/api/v1/scheduler/jobs/${jobId}/unschedule`)
+    const response = await this.post(`/scheduler/jobs/${jobId}/unschedule`)
     if (!response.ok) throw new Error(await this.errorMessage(response, 'Unable to unschedule the job.'))
   }
 
@@ -132,7 +128,7 @@ class SchedulerService extends BaseApiService {
   async unscheduled(limit?: number): Promise<ScheduleJob[]> {
     const query = limit ? `?limit=${limit}` : ''
     const payload = await this.data<ScheduleJob[] | null>(
-      await this.get(`/api/v1/scheduler/unscheduled${query}`),
+      await this.get(`/scheduler/unscheduled${query}`),
       'Couldn’t load unscheduled jobs.',
     )
     return Array.isArray(payload) ? payload : []

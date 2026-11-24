@@ -10,6 +10,7 @@ import Button from 'primevue/button'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import AppHeader from '../components/AppHeader.vue'
+import { hasAdminRole, ROLES } from '../constants/roles'
 import { userColor, userInitials, userName, userRoleNames, userStatus, type User, type UserStatus } from '../services/User'
 import { invitationService, type InvitationResult, type InvitationStatus } from '../services/InvitationService'
 import { userService } from '../services/UserService'
@@ -27,7 +28,7 @@ const statuses: Array<'All statuses' | UserStatus> = ['All statuses', 'Active', 
 const showingArchived = computed(() => statusFilter.value === 'Archived')
 /** The users the list works from: the archived ones only when that filter is chosen. */
 const shown = computed(() => (showingArchived.value ? archivedUsers.value ?? [] : users.value))
-const roles = computed(() => ['All roles', ...[...new Set(shown.value.flatMap(userRoleNames))].sort()])
+const roles = ['All roles', ...ROLES]
 
 async function load() {
   loading.value = true
@@ -68,7 +69,7 @@ const filteredUsers = computed(() => {
 
 const activeCount = computed(() => users.value.filter((user) => userStatus(user) === 'Active').length)
 const inviteCount = computed(() => users.value.filter((user) => userStatus(user) === 'Invited').length)
-const adminCount = computed(() => users.value.filter((user) => userRoleNames(user).some((name) => name === 'Admin' || name === 'Super Admin')).length)
+const adminCount = computed(() => users.value.filter((user) => hasAdminRole(userRoleNames(user))).length)
 
 const inviteOpen = ref(false)
 const inviteText = ref('')

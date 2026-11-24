@@ -31,13 +31,13 @@ class TenantService extends BaseApiService {
   /** The tenant served from `subdomain`, or null when there is none. Anonymous. */
   /** The active tenants, or only the archived ones (`GET /tenants`). Super Admin only. */
   async list(archived = false): Promise<TenantDetail[]> {
-    const payload = await this.data<TenantDetail[] | null>(await this.get(archived ? '/api/v1/tenants?archived=true' : '/api/v1/tenants'), 'Couldn’t load workspaces.')
+    const payload = await this.data<TenantDetail[] | null>(await this.get(archived ? '/tenants?archived=true' : '/tenants'), 'Couldn’t load workspaces.')
     return Array.isArray(payload) ? payload : []
   }
 
   /** One tenant (`GET /tenants/{id}`). Super Admin only. */
   async detail(tenantId: string): Promise<TenantDetail> {
-    return this.data<TenantDetail>(await this.get(`/api/v1/tenants/${tenantId}`), 'Couldn’t load the workspace.')
+    return this.data<TenantDetail>(await this.get(`/tenants/${tenantId}`), 'Couldn’t load the workspace.')
   }
 
   /**
@@ -45,39 +45,39 @@ class TenantService extends BaseApiService {
    * `logoUpdated`) makes the browser fetch a new image right after an upload instead of reusing the old one.
    */
   logoUrl(tenantId: string, version?: string | null): string {
-    return this.url(`/api/v1/public/tenants/${tenantId}/logo${version ? `?v=${encodeURIComponent(version)}` : ''}`)
+    return this.url(`/public/tenants/${tenantId}/logo${version ? `?v=${encodeURIComponent(version)}` : ''}`)
   }
 
   /** Sets the tenant's logo (`POST /tenants/{id}/logo`, multipart). Super Admin only. */
   async uploadLogo(tenantId: string, file: File): Promise<TenantDetail> {
     const form = new FormData()
     form.append('file', file)
-    return this.data<TenantDetail>(await this.post(`/api/v1/tenants/${tenantId}/logo`, form), 'Unable to upload the logo.')
+    return this.data<TenantDetail>(await this.post(`/tenants/${tenantId}/logo`, form), 'Unable to upload the logo.')
   }
 
   async removeLogo(tenantId: string): Promise<TenantDetail> {
-    return this.data<TenantDetail>(await this.delete(`/api/v1/tenants/${tenantId}/logo`), 'Unable to remove the logo.')
+    return this.data<TenantDetail>(await this.delete(`/tenants/${tenantId}/logo`), 'Unable to remove the logo.')
   }
 
   /** Changes the tenant's name and/or archived flag (`POST /tenants/{id}`). Super Admin only. */
   async update(tenantId: string, changes: { name?: string; subdomain?: string; archived?: boolean }): Promise<TenantDetail> {
-    return this.data<TenantDetail>(await this.post(`/api/v1/tenants/${tenantId}`, changes), 'Unable to save the workspace.')
+    return this.data<TenantDetail>(await this.post(`/tenants/${tenantId}`, changes), 'Unable to save the workspace.')
   }
 
   /** The tenant's users with their roles there (`GET /tenants/{id}/users`). Super Admin only. */
   async users(tenantId: string): Promise<User[]> {
-    const payload = await this.data<User[] | null>(await this.get(`/api/v1/tenants/${tenantId}/users`), 'Couldn’t load the workspace’s users.')
+    const payload = await this.data<User[] | null>(await this.get(`/tenants/${tenantId}/users`), 'Couldn’t load the workspace’s users.')
     return Array.isArray(payload) ? payload : []
   }
 
   /** Emails each address a registration link for the tenant (`POST /tenants/{id}/invitations`). Super Admin only. */
   async invite(tenantId: string, emails: string[]): Promise<InvitationResult[]> {
-    const payload = await this.data<InvitationResult[] | null>(await this.post(`/api/v1/tenants/${tenantId}/invitations`, { emails }), 'Unable to send the invitations.')
+    const payload = await this.data<InvitationResult[] | null>(await this.post(`/tenants/${tenantId}/invitations`, { emails }), 'Unable to send the invitations.')
     return Array.isArray(payload) ? payload : []
   }
 
   async bySubdomain(subdomain: string): Promise<TenantSummary | null> {
-    const response = await this.get(`/api/v1/public/tenants/by-subdomain/${encodeURIComponent(subdomain)}`, { authenticated: false })
+    const response = await this.get(`/public/tenants/by-subdomain/${encodeURIComponent(subdomain)}`, { authenticated: false })
     if (response.status === 404) return null
     return this.data<TenantSummary>(response, 'Couldn’t look up this workspace.')
   }

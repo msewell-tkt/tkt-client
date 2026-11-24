@@ -149,7 +149,7 @@ function jobBody(job: NewJob) {
   }
 }
 
-const jobPath = (workOrderId: string, jobId: string) => `/api/v1/work-orders/${workOrderId}/jobs/${jobId}`
+const jobPath = (workOrderId: string, jobId: string) => `/work-orders/${workOrderId}/jobs/${jobId}`
 
 /** The browser's time zone, so a scheduled job lands on the right day for its technician. */
 function tzQuery() {
@@ -176,7 +176,7 @@ class WorkOrderService extends BaseApiService {
     if (query.offset) params.set('offset', String(query.offset))
     const qs = params.toString()
     const payload = await this.data<Partial<WorkOrderPage> | null>(
-      await this.get(`/api/v1/work-orders${qs ? `?${qs}` : ''}`),
+      await this.get(`/work-orders${qs ? `?${qs}` : ''}`),
       'Couldn’t load work orders.',
     )
     const workOrders = Array.isArray(payload?.workOrders) ? payload.workOrders.map(reviveOrder) : []
@@ -191,7 +191,7 @@ class WorkOrderService extends BaseApiService {
   /** Values for the `status` filter: Open, Complete, Canceled, Archive (`GET /api/work-orders/statuses`). */
   async statuses(): Promise<string[]> {
     const payload = await this.data<string[] | null>(
-      await this.get('/api/v1/work-orders/statuses'),
+      await this.get('/work-orders/statuses'),
       'Couldn’t load work order statuses.',
     )
     return Array.isArray(payload) ? payload : []
@@ -199,17 +199,17 @@ class WorkOrderService extends BaseApiService {
 
   /** A work order with all its jobs (`GET /api/work-orders/{id}`). */
   async detail(id: string): Promise<WorkOrder> {
-    return reviveOrder(await this.data<WorkOrder>(await this.get(`/api/v1/work-orders/${id}`), 'Couldn’t load the work order.'))
+    return reviveOrder(await this.data<WorkOrder>(await this.get(`/work-orders/${id}`), 'Couldn’t load the work order.'))
   }
 
   /** Saves the whole work order (the API takes its own fields: unit, occupied, dates, reporter and status) and returns it with its jobs. Requires the Admin or Super Admin role. */
   async update(order: WorkOrder): Promise<WorkOrder> {
-    return reviveOrder(await this.data<WorkOrder>(await this.put(`/api/v1/work-orders/${order.id}`, order), 'Unable to save the work order.'))
+    return reviveOrder(await this.data<WorkOrder>(await this.put(`/work-orders/${order.id}`, order), 'Unable to save the work order.'))
   }
 
   /** Deletes a work order and all its jobs. Requires the Admin or Super Admin role. */
   async remove(id: string): Promise<void> {
-    await this.deleteAt(`/api/v1/work-orders/${id}`, 'Unable to delete the work order.')
+    await this.deleteAt(`/work-orders/${id}`, 'Unable to delete the work order.')
   }
 
   /** Deletes one job of a work order. Requires the Admin or Super Admin role. */
@@ -255,7 +255,7 @@ class WorkOrderService extends BaseApiService {
   /** Creates a work order and its jobs. Requires the Admin or Super Admin role. */
   async create(order: NewWorkOrder): Promise<WorkOrder> {
     return reviveOrder(await this.data<WorkOrder>(
-      await this.post(`/api/v1/work-orders${tzQuery()}`, { ...order, jobs: order.jobs.map(jobBody) }),
+      await this.post(`/work-orders${tzQuery()}`, { ...order, jobs: order.jobs.map(jobBody) }),
       'Unable to create the work order.',
     ))
   }
@@ -263,7 +263,7 @@ class WorkOrderService extends BaseApiService {
   /** Adds a job to an existing work order. Requires the Admin or Super Admin role. */
   async addJob(workOrderId: string, job: NewJob): Promise<WorkOrderJob> {
     return reviveJob(await this.data<WorkOrderJob>(
-      await this.post(`/api/v1/work-orders/${workOrderId}/jobs${tzQuery()}`, jobBody(job)),
+      await this.post(`/work-orders/${workOrderId}/jobs${tzQuery()}`, jobBody(job)),
       'Unable to add the job.',
     ))
   }

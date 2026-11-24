@@ -16,8 +16,6 @@ export interface ServiceItem {
   cost: number | null
   list: number | null
   extra: boolean
-  /** True when the item is available to every property of the tenant rather than one property. */
-  global?: boolean
 }
 
 /** A property resource; today the client uses these as image URLs. */
@@ -56,7 +54,7 @@ class PropertyService extends BaseApiService {
 
   async list(): Promise<PropertyView> {
     const payload = await this.data<Partial<PropertyView> | null>(
-      await this.get('/api/v1/properties'),
+      await this.get('/properties'),
       'Couldn’t load properties.',
     )
     return {
@@ -66,54 +64,45 @@ class PropertyService extends BaseApiService {
     }
   }
 
-  /** Creates the property when `id` is null, otherwise updates it. */
-  async save(property: Property): Promise<Property> {
-    return this.data<Property>(await this.post('/api/v1/properties', property), 'Unable to save the property.')
+  /**
+   * Creates the property when `id` is null, otherwise updates it. When creating, `cloneServiceItemsFromPropertyId`
+   * copies every service item of that property onto the new one (the server ignores it on an update).
+   */
+  async save(property: Property, cloneServiceItemsFromPropertyId?: string | null): Promise<Property> {
+    const body = cloneServiceItemsFromPropertyId && !property.id ? { ...property, cloneServiceItemsFromPropertyId } : property
+    return this.data<Property>(await this.post('/properties', body), 'Unable to save the property.')
   }
 
   async contacts(propertyId: string): Promise<Contact[]> {
-    return this.fetchList(`/api/v1/properties/${propertyId}/contacts`, 'Couldn’t load contacts.')
+    return this.fetchList(`/properties/${propertyId}/contacts`, 'Couldn’t load contacts.')
   }
 
   async saveContact(propertyId: string, contact: Contact): Promise<Contact> {
     return this.data<Contact>(
-      await this.post(`/api/v1/properties/${propertyId}/contacts`, contact),
+      await this.post(`/properties/${propertyId}/contacts`, contact),
       'Unable to save the contact.',
     )
   }
 
+  /** The property's service items: what a job at the property can use. */
   async serviceItems(propertyId: string): Promise<ServiceItem[]> {
-    return this.fetchList(`/api/v1/properties/${propertyId}/service-items`, 'Couldn’t load service items.')
-  }
-
-  /** The property's own service items plus the tenant's global ones: what a job at the property can use. */
-  async availableServiceItems(propertyId: string): Promise<ServiceItem[]> {
-    return this.fetchList(`/api/v1/properties/${propertyId}/available-service-items`, 'Couldn’t load service items.')
-  }
-
-  /** Service items available to every property of the tenant. */
-  async globalServiceItems(): Promise<ServiceItem[]> {
-    return this.fetchList('/api/v1/service-items', 'Couldn’t load global service items.')
-  }
-
-  async saveGlobalServiceItem(item: ServiceItem): Promise<ServiceItem> {
-    return this.data<ServiceItem>(await this.post('/api/v1/service-items', item), 'Unable to save the service item.')
+    return this.fetchList(`/properties/${propertyId}/service-items`, 'Couldn’t load service items.')
   }
 
   async saveServiceItem(propertyId: string, item: ServiceItem): Promise<ServiceItem> {
     return this.data<ServiceItem>(
-      await this.post(`/api/v1/properties/${propertyId}/service-items`, item),
+      await this.post(`/properties/${propertyId}/service-items`, item),
       'Unable to save the service item.',
     )
   }
 
   async resources(propertyId: string): Promise<PropertyResource[]> {
-    return this.fetchList(`/api/v1/properties/${propertyId}/resources`, 'Couldn’t load images.')
+    return this.fetchList(`/properties/${propertyId}/resources`, 'Couldn’t load images.')
   }
 
   async saveResource(propertyId: string, resource: PropertyResource): Promise<PropertyResource> {
     return this.data<PropertyResource>(
-      await this.post(`/api/v1/properties/${propertyId}/resources`, resource),
+      await this.post(`/properties/${propertyId}/resources`, resource),
       'Unable to save the image.',
     )
   }

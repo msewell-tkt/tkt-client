@@ -39,19 +39,19 @@ class TenantRegistrationService extends BaseApiService {
 
   /** Emails the address a confirmation link (`POST /tenant-registrations`). Nothing is created until it is confirmed. */
   async register(registration: TenantRegistration): Promise<void> {
-    const response = await this.post('/api/v1/public/tenant-registrations', registration, { authenticated: false })
+    const response = await this.post('/public/tenant-registrations', registration, { authenticated: false })
     if (!response.ok) throw new Error(await this.errorMessage(response, 'Unable to start your registration.'))
   }
 
   async view(token: string): Promise<TenantRegistrationView> {
-    const response = await this.get(`/api/v1/public/tenant-registrations/${encodeURIComponent(token)}`, { authenticated: false })
+    const response = await this.get(`/public/tenant-registrations/${encodeURIComponent(token)}`, { authenticated: false })
     if (response.status === 404) throw new Error(BAD_LINK)
     return this.data<TenantRegistrationView>(response, 'Couldn’t load your registration.')
   }
 
   /** Creates the tenant and its first admin, and emails a new user their PIN. The token works once. */
   async verify(token: string): Promise<TenantRegistrationResult> {
-    const response = await this.post(`/api/v1/public/tenant-registrations/${encodeURIComponent(token)}/verify`, undefined, { authenticated: false })
+    const response = await this.post(`/public/tenant-registrations/${encodeURIComponent(token)}/verify`, undefined, { authenticated: false })
     if (response.status === 404) throw new Error(BAD_LINK)
     return this.data<TenantRegistrationResult>(response, 'Unable to confirm your email.')
   }

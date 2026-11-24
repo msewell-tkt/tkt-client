@@ -31,20 +31,20 @@ class InvitationService extends BaseApiService {
 
   /** Emails each address a registration link (`POST /api/invitations`, up to 50). Requires the Admin or Super Admin role. */
   async invite(emails: string[]): Promise<InvitationResult[]> {
-    const payload = await this.data<InvitationResult[] | null>(await this.post('/api/v1/invitations', { emails }), 'Unable to send the invitations.')
+    const payload = await this.data<InvitationResult[] | null>(await this.post('/invitations', { emails }), 'Unable to send the invitations.')
     return Array.isArray(payload) ? payload : []
   }
 
   /** The invitation behind a registration link. Anonymous: an unknown, used or expired token answers 404. */
   async view(token: string): Promise<InvitationView> {
-    const response = await this.get(`/api/v1/public/invitations/${encodeURIComponent(token)}`, { authenticated: false })
+    const response = await this.get(`/public/invitations/${encodeURIComponent(token)}`, { authenticated: false })
     if (response.status === 404) throw new Error('This invitation link is invalid or has expired. Ask your admin to send a new one.')
     return this.data<InvitationView>(response, 'Couldn’t load the invitation.')
   }
 
   /** Registers the user for the tenant and, for a new user, emails them a PIN. The token works once. */
   async accept(token: string, registration: Registration): Promise<void> {
-    const response = await this.post(`/api/v1/public/invitations/${encodeURIComponent(token)}/accept`, registration, { authenticated: false })
+    const response = await this.post(`/public/invitations/${encodeURIComponent(token)}/accept`, registration, { authenticated: false })
     if (response.status === 404) throw new Error('This invitation link is invalid or has expired. Ask your admin to send a new one.')
     if (!response.ok) throw new Error(await this.errorMessage(response, 'Unable to complete your registration.'))
   }

@@ -22,7 +22,7 @@ class DashboardService extends BaseApiService {
   }
 
   async load(): Promise<Session> {
-    return this.data<Session>(await this.get('/api/v1/dashboard'), 'Unable to load your session.')
+    return this.data<Session>(await this.get('/dashboard'), 'Unable to load your session.')
   }
 }
 

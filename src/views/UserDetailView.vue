@@ -10,19 +10,18 @@ import ProgressSpinner from 'primevue/progressspinner'
 import Tag from 'primevue/tag'
 import ToggleSwitch from 'primevue/toggleswitch'
 import AppHeader from '../components/AppHeader.vue'
+import { ROLES, RoleEnum } from '../constants/roles'
 import { userColor, userInitials, userName, userRoleNames, userStatus, type User, type UserStatus } from '../services/User'
 import { propertyService } from '../services/PropertyService'
 import { dashboardService } from '../services/DashboardService'
 import { tenantService, type TenantSummary } from '../services/TenantService'
-import { userService, type Role, type UserProperty, type UserType } from '../services/UserService'
+import { userService, type UserProperty, type UserType } from '../services/UserService'
 import { formatTimestamp } from '../utils/workOrderFormat'
 
-const SUPER_ADMIN = 'Super Admin'
 
 const route = useRoute()
 const router = useRouter()
 const user = ref<User | null>(null)
-const tenantRoles = ref<Role[]>([])
 const allProperties = ref<UserProperty[]>([])
 const linked = ref<UserProperty[]>([])
 const allUserTypes = ref<UserType[]>([])
@@ -41,13 +40,12 @@ onMounted(async () => {
   try {
     const matches = (item: User) => item.id === route.params.id
     const session = await dashboardService.load()
-    isSuperAdmin.value = session.roles.includes(SUPER_ADMIN)
+    isSuperAdmin.value = session.roles.includes(RoleEnum.SUPER_ADMIN)
     currentTenantId.value = session.tid
     const found = (await userService.list()).find(matches) ?? (await userService.list(true)).find(matches) ?? null
     user.value = found
     if (!found) return
-    const [roles, properties, view, types, mine] = await Promise.all([userService.roles(), userService.properties(found.id), propertyService.list(), userService.userTypes(), userService.userTypesOf(found.id)])
-    tenantRoles.value = roles
+    const [properties, view, types, mine] = await Promise.all([userService.properties(found.id), propertyService.list(), userService.userTypes(), userService.userTypesOf(found.id)])
     linked.value = properties
     allUserTypes.value = types
     userTypes.value = mine
@@ -74,24 +72,24 @@ async function change(action: () => Promise<void>, fallback: string) {
   }
 }
 
-const roleIds = computed({
-  get: () => (user.value?.roles ?? []).map((role) => role.id),
-  set: (ids: string[]) => {
+const userRoles = computed({
+  get: () => user.value?.roles ?? [],
+  set: (roles: RoleEnum[]) => {
     const current = user.value
     if (!current) return
-    const have = new Set((current.roles ?? []).map((role) => role.id))
-    const added = ids.filter((id) => !have.has(id))
-    const removed = [...have].filter((id) => !ids.includes(id))
+    const have = new Set(current.roles ?? [])
+    const added = roles.filter((role) => !have.has(role))
+    const removed = [...have].filter((role) => !roles.includes(role))
     void change(async () => {
-      for (const id of added) await userService.addRole(current.id, id)
-      for (const id of removed) await userService.removeRole(current.id, id)
-      current.roles = tenantRoles.value.filter((role) => ids.includes(role.id))
+      for (const role of added) await userService.addRole(current.id, role)
+      for (const role of removed) await userService.removeRole(current.id, role)
+      current.roles = ROLES.filter((role) => roles.includes(role))
     }, 'Unable to change the roles.')
   },
 })
 
 /** Only a Super Admin can hand out the Super Admin role; Admins hand out the rest. */
-const roleOptions = computed(() => tenantRoles.value.map((role) => ({ ...role, locked: role.name === SUPER_ADMIN && !isSuperAdmin.value })))
+const roleOptions = computed(() => ROLES.map((role) => ({ name: role, locked: role === RoleEnum.SUPER_ADMIN && !isSuperAdmin.value })))
 
 const tenantIds = computed({
   get: () => userTenants.value.map((item) => item.id),
@@ -239,7 +237,7 @@ function statusSeverity(value: UserStatus) {
 
             <section class="rounded-2xl border border-[#e2e6ef] bg-white p-6 shadow-[0_10px_30px_rgba(30,41,75,.04)]">
               <div class="mb-4"><h2 class="m-0 text-lg tracking-[-.02em]">Roles</h2><p class="mt-1 mb-0 text-sm text-[#7d8698]">What this user can do in your workspace.</p></div>
-              <MultiSelect v-model="roleIds" :options="roleOptions" option-label="name" option-value="id" option-disabled="locked" display="chip" placeholder="No roles assigned" class="w-full" :disabled="busy" />
+              <MultiSelect v-model="userRoles" :options="roleOptions" option-label="name" option-value="name" option-disabled="locked" display="chip" placeholder="No roles assigned" class="w-full" :disabled="busy" />
             </section>
 
             <section v-if="isSuperAdmin" class="rounded-2xl border border-[#e2e6ef] bg-white p-6 shadow-[0_10px_30px_rgba(30,41,75,.04)]">

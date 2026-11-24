@@ -221,8 +221,8 @@ async function removeUser() {
         <Message v-if="actionError" severity="error" :closable="false" class="mb-5">{{ actionError }}</Message>
 
         <section class="mb-5 flex items-center gap-5 rounded-2xl border border-[#e2e6ef] bg-white p-5 shadow-[0_10px_30px_rgba(30,41,75,.04)] max-[560px]:flex-col max-[560px]:items-start">
-          <div class="grid h-20 w-40 shrink-0 place-items-center overflow-hidden rounded-xl border border-dashed border-[#d5dae6] bg-[#f6f7fb] text-[#8a93a5]">
-            <TenantLogo v-if="tenant.logoUpdated" :tenant-id="tenant.id" :version="tenant.logoUpdated" :alt="`${tenant.name} logo`" img-class="h-full w-full object-contain p-2">
+          <div class="relative grid h-20 w-40 shrink-0 place-items-center overflow-hidden rounded-xl border border-dashed border-[#d5dae6] bg-[#f6f7fb] text-[#8a93a5]">
+            <TenantLogo v-if="tenant.logoUpdated" :tenant-id="tenant.id" :version="tenant.logoUpdated" :alt="`${tenant.name} logo`" img-class="absolute inset-0 h-full w-full object-contain p-2">
               <i class="pi pi-image text-2xl" />
             </TenantLogo>
             <i v-else class="pi pi-image text-2xl" />

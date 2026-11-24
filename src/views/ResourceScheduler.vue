@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Drawer from 'primevue/drawer'
@@ -217,10 +217,13 @@ function toItem(job: ScheduleJob, resourceId: string | null): ScheduleItem | nul
   }
 }
 
-async function loadWeek() {
+/** `silent` refreshes in the background: no spinner, and a failure keeps the grid as it is. */
+async function loadWeek(silent = false) {
   const sequence = ++loadSequence
-  loading.value = true
-  loadError.value = ''
+  if (!silent) {
+    loading.value = true
+    loadError.value = ''
+  }
   try {
     const [users, unscheduled] = await Promise.all([
       schedulerService.weekly(weekStart.value, userType.value === ALL_TYPES ? undefined : userType.value),
@@ -230,7 +233,7 @@ async function loadWeek() {
     resources.value = users.map((user) => ({
       id: user.id,
       name: personName(user),
-      roles: (user.roles ?? []).map((role) => role.name).filter(Boolean),
+      roles: user.roles ?? [],
     }))
     jobs.value = users.flatMap((user) => (user.workOrderJobs ?? [])
       .map((job) => toItem(job, user.id))
@@ -240,7 +243,7 @@ async function loadWeek() {
       .filter((item): item is ScheduleItem => item !== null))
     localChanges.value = 0
   } catch (reason) {
-    if (sequence !== loadSequence) return
+    if (sequence !== loadSequence || silent) return
     loadError.value = reason instanceof Error ? reason.message : 'Couldn’t load the schedule.'
     resources.value = []
     jobs.value = []
@@ -445,11 +448,24 @@ async function loadUserTypes() {
   }
 }
 
-watch([weekStart, userType], loadWeek)
+const REFRESH_INTERVAL_MS = 10_000
+let refreshTimer: number | undefined
+
+/** Skips a tick while the page is hidden or the user is mid-action, so nothing is overwritten. */
+function autoRefresh() {
+  if (document.hidden || loading.value || sending.value || draggedJobId.value) return
+  if (orderOpen.value || eventOpen.value || localChanges.value > 0) return
+  if (jobs.value.some((item) => item.saving)) return
+  void loadWeek(true)
+}
+
+watch([weekStart, userType], () => loadWeek())
 onMounted(() => {
   void loadUserTypes()
   void loadWeek()
+  refreshTimer = window.setInterval(autoRefresh, REFRESH_INTERVAL_MS)
 })
+onBeforeUnmount(() => window.clearInterval(refreshTimer))
 </script>
 
 <template>
@@ -473,7 +489,6 @@ onMounted(() => {
         </div>
         <div class="flex items-center gap-1 max-[900px]:flex-wrap max-[900px]:[&_.p-button:last-child]:flex-1">
           <Select v-model="userType" :options="userTypeOptions" class="w-40" aria-label="Filter by user type" />
-          <Button icon="pi pi-refresh" severity="secondary" text rounded aria-label="Reload schedule" :loading="loading" @click="loadWeek" />
           <Button icon="pi pi-cog" severity="secondary" text rounded aria-label="Preferences" @click="settingsOpen = true" />
           <Button icon="pi pi-plus" label="New work order" severity="secondary" outlined @click="newWorkOrder" />
           <Button icon="pi pi-file-edit" severity="secondary" text rounded aria-label="Add schedule note" @click="openEventDialog" />
@@ -484,7 +499,7 @@ onMounted(() => {
 
       <div v-if="localChanges" class="mx-auto flex max-w-[1800px] items-center justify-between gap-4 border border-b-0 border-[#f1d9a6] bg-[#fff8e8] px-4 py-[.55rem] text-[.86rem] font-semibold text-[#8a5a00]" role="status">
         <span><i class="pi pi-exclamation-triangle mr-[.4rem]" />{{ localChanges }} unsaved {{ localChanges === 1 ? 'note' : 'notes' }}. Notes stay in this browser; the API can’t save them yet.</span>
-        <Button label="Discard" size="small" severity="secondary" text @click="loadWeek" />
+        <Button label="Discard" size="small" severity="secondary" text @click="loadWeek()" />
       </div>
       <div v-if="notice" :class="['mx-auto max-w-[1800px] border border-b-0 px-4 py-[.7rem] text-[.86rem] font-semibold', notice.severity === 'success' ? 'border-[#afe2d7] bg-[#e8faf5] text-[#08745f]' : 'border-[#f0c7c7] bg-[#fff7f7] text-[#9c3f3f]']" role="status"><i :class="['pi mr-[.4rem]', notice.severity === 'success' ? 'pi-check-circle' : 'pi-exclamation-circle']" />{{ notice.text }}</div>
       <Message v-if="loadError" severity="error" :closable="false" class="mx-auto max-w-[1800px]">{{ loadError }}</Message>

@@ -223,7 +223,7 @@ function loadLookups() {
 function loadServiceItems(propertyId: string) {
   // always refetch: the drawer stays mounted, so a cached list would miss items added since it was first opened
   if (!propertyId) return
-  propertyService.availableServiceItems(propertyId)
+  propertyService.serviceItems(propertyId)
     .then((items) => { serviceItemsByProperty.value[propertyId] = items })
     .catch((reason) => { saveError.value = reason instanceof Error ? reason.message : 'Couldn’t load service items.' })
 }

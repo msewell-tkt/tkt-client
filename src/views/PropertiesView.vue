@@ -41,7 +41,6 @@ const properties = ref<Property[]>([])
 // Sub-resources of the property open in the editor, loaded from the API when it opens.
 const contacts = ref<Contact[]>([])
 const services = ref<ServiceItem[]>([])
-const globalServices = ref<ServiceItem[]>([])
 const images = ref<PropertyResource[]>([])
 const detailsLoading = ref(false)
 const detailsError = ref('')
@@ -56,29 +55,18 @@ const tabs: Array<{ value: EditorTab; label: string; icon: string }> = [
   { value: 'images', label: 'Images', icon: 'pi pi-images' },
 ]
 
-const serviceGroups = computed(() => [
-  {
-    scope: 'property' as const,
-    title: 'Property service items',
-    description: 'Work types offered only at this property, with cost and list price.',
-    items: services.value,
-    emptyTitle: 'No property-specific items',
-    emptyHint: 'Add work types that only this property orders.',
-  },
-  {
-    scope: 'global' as const,
-    title: 'Global service items',
-    description: 'Available at every property. Changes here apply to all of your properties.',
-    items: globalServices.value,
-    emptyTitle: 'No global items yet',
-    emptyHint: 'Add work types that any property can order.',
-  },
+/** Start-empty choice of the "copy service items from" picker. */
+const START_EMPTY = ''
+const cloneFromId = ref(START_EMPTY)
+const cloneSourceOptions = computed(() => [
+  { id: START_EMPTY, name: 'Start empty' },
+  ...properties.value.filter((item) => item.id && !item.archived).map((item) => ({ id: item.id as string, name: item.name })),
 ])
 
 const filteredProperties = computed(() => {
   const term = search.value.trim().toLowerCase()
   return properties.value
-    .filter((item) => showArchived.value || item.archived !== true)
+    .filter((item) => (item.archived === true) === showArchived.value)
     .filter((item) => !term || `${item.name} ${item.address1} ${item.city} ${item.postalCode}`.toLowerCase().includes(term))
     .sort((a, b) => a.name.localeCompare(b.name) * (sortDirection.value === 'asc' ? 1 : -1))
 })
@@ -107,6 +95,7 @@ function startEditing(property: Property) {
   savedNotice.value = false
   saveError.value = ''
   detailsError.value = ''
+  cloneFromId.value = START_EMPTY
   contacts.value = []
   services.value = []
   images.value = []
@@ -130,16 +119,14 @@ async function loadDetails(propertyId: string) {
   detailsLoading.value = true
   detailsError.value = ''
   try {
-    const [loadedContacts, loadedServices, loadedGlobalServices, loadedImages] = await Promise.all([
+    const [loadedContacts, loadedServices, loadedImages] = await Promise.all([
       propertyService.contacts(propertyId),
       propertyService.serviceItems(propertyId),
-      propertyService.globalServiceItems(),
       propertyService.resources(propertyId),
     ])
     if (editing.value?.id !== propertyId) return
     contacts.value = loadedContacts
     services.value = loadedServices
-    globalServices.value = loadedGlobalServices
     images.value = loadedImages
   } catch (reason) {
     detailsError.value = message(reason, 'Couldn’t load property details.')
@@ -159,7 +146,7 @@ async function saveProperty(): Promise<boolean> {
   saving.value = true
   saveError.value = ''
   try {
-    const saved = await propertyService.save(editing.value)
+    const saved = await propertyService.save(editing.value, cloneFromId.value || null)
     editing.value = cloneProperty(saved)
     upsertProperty(saved)
     flashSaved()
@@ -211,29 +198,22 @@ async function makePrimaryContact(contact: Contact) {
 
 // Service items
 
-type ServiceScope = 'property' | 'global'
-
-const serviceItems = (scope: ServiceScope) => (scope === 'global' ? globalServices : services)
-
-function addServiceItem(scope: ServiceScope) {
-  serviceItems(scope).value.push({ id: null, name: '', cost: null, list: null, extra: false })
+function addServiceItem() {
+  services.value.push({ id: null, name: '', cost: null, list: null, extra: false })
 }
 
-async function saveServiceItem(scope: ServiceScope, index: number) {
+async function saveServiceItem(index: number) {
   const propertyId = editing.value?.id
-  const list = serviceItems(scope)
-  const item = list.value[index]
+  const item = services.value[index]
   if (!propertyId || !item) return
   if (!item.name.trim()) {
     saveError.value = 'A service item needs a name.'
     return
   }
-  rowSaving.value = `service-${scope}-${index}`
+  rowSaving.value = `service-${index}`
   saveError.value = ''
   try {
-    list.value[index] = scope === 'global'
-      ? await propertyService.saveGlobalServiceItem(item)
-      : await propertyService.saveServiceItem(propertyId, item)
+    services.value[index] = await propertyService.saveServiceItem(propertyId, item)
     flashSaved()
   } catch (reason) {
     saveError.value = message(reason, 'Unable to save the service item.')
@@ -389,6 +369,7 @@ onMounted(async () => {
             <label>ZIP code <InputText v-model="editing.postalCode" inputmode="numeric" /></label>
             <label>Gate code <InputText v-model="editing.securityCode" /></label>
             <label>Phone <InputText v-model="editing.phone" type="tel" /></label>
+            <label v-if="!editing.id" class="col-span-2 max-[620px]:col-span-1">Copy service items from<Select v-model="cloneFromId" :options="cloneSourceOptions" option-label="name" option-value="id" filter /><small class="font-normal text-[#858e9f]">Copies each item’s name, cost, list price and add-on setting. The copies are independent of the original.</small></label>
             <label class="col-span-2 max-[620px]:col-span-1">Notes <Textarea v-model="editing.description" rows="4" placeholder="Access details, parking notes, or team instructions…" /></label>
             <div class="col-span-2 grid grid-cols-2 gap-3 max-[620px]:col-span-1 max-[620px]:grid-cols-1">
               <div class="flex items-center justify-between gap-4 rounded-xl border border-[#e3e7ee] px-4 py-3"><div><strong class="block text-[.84rem]">Archived</strong><small class="mt-1 block text-[#858e9f]">Hide from active property lists.</small></div><ToggleSwitch :model-value="editing.archived" @update:model-value="editing.archived = $event ? true : false" /></div>
@@ -415,10 +396,10 @@ onMounted(async () => {
             </section>
 
             <section v-else-if="activeTab === 'services'" class="grid gap-8">
-              <div v-for="group in serviceGroups" :key="group.scope">
-                <div class="mb-5 flex items-center justify-between gap-4"><div><h3 class="m-0 text-lg tracking-[-.02em]">{{ group.title }}</h3><p class="mt-1 mb-0 text-sm text-[#7c8597]">{{ group.description }}</p></div><Button type="button" icon="pi pi-plus" label="Add item" size="small" outlined @click="addServiceItem(group.scope)" /></div>
-                <div v-if="group.items.length" class="grid gap-3">
-                  <article v-for="(service, index) in group.items" :key="service.id ?? `new-${group.scope}-${index}`" class="rounded-xl border border-[#e2e6ed] p-4">
+              <div>
+                <div class="mb-5 flex items-center justify-between gap-4"><div><h3 class="m-0 text-lg tracking-[-.02em]">Service items</h3><p class="mt-1 mb-0 text-sm text-[#7c8597]">Work types offered at this property, with cost and list price.</p></div><Button type="button" icon="pi pi-plus" label="Add item" size="small" outlined @click="addServiceItem()" /></div>
+                <div v-if="services.length" class="grid gap-3">
+                  <article v-for="(service, index) in services" :key="service.id ?? `new-${index}`" class="rounded-xl border border-[#e2e6ed] p-4">
                     <div class="grid grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)] gap-3 max-[620px]:grid-cols-1 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-[.75rem] [&_label]:font-bold [&_label]:text-[#5b6476] [&_.p-inputtext]:w-full [&_.p-inputnumber]:w-full">
                       <label>Name<InputText v-model="service.name" placeholder="e.g. Full paint" /></label>
                       <label>Cost<InputNumber v-model="service.cost" mode="currency" currency="USD" locale="en-US" /></label>
@@ -427,13 +408,13 @@ onMounted(async () => {
                     <div class="mt-4 flex items-center justify-between gap-3">
                       <label class="flex cursor-pointer items-center gap-2 text-xs font-bold text-[#5b6476]"><ToggleSwitch v-model="service.extra" /> Extra (add-on item)</label>
                       <div class="flex items-center gap-2">
-                        <Button v-if="!service.id" type="button" label="Discard" severity="secondary" text size="small" @click="group.items.splice(index, 1)" />
-                        <Button type="button" icon="pi pi-check" :label="service.id ? 'Save item' : 'Add item'" size="small" outlined :loading="rowSaving === `service-${group.scope}-${index}`" @click="saveServiceItem(group.scope, index)" />
+                        <Button v-if="!service.id" type="button" label="Discard" severity="secondary" text size="small" @click="services.splice(index, 1)" />
+                        <Button type="button" icon="pi pi-check" :label="service.id ? 'Save item' : 'Add item'" size="small" outlined :loading="rowSaving === `service-${index}`" @click="saveServiceItem(index)" />
                       </div>
                     </div>
                   </article>
                 </div>
-                <div v-else-if="!detailsLoading" class="grid min-h-40 place-items-center rounded-xl border border-dashed border-[#d8dde7] text-center"><div><i class="pi pi-wrench text-2xl text-[#9ba3b1]" /><strong class="mt-3 block">{{ group.emptyTitle }}</strong><p class="mt-1 text-sm text-[#838c9d]">{{ group.emptyHint }}</p></div></div>
+                <div v-else-if="!detailsLoading" class="grid min-h-40 place-items-center rounded-xl border border-dashed border-[#d8dde7] text-center"><div><i class="pi pi-wrench text-2xl text-[#9ba3b1]" /><strong class="mt-3 block">No service items yet</strong><p class="mt-1 text-sm text-[#838c9d]">Add the work types this property orders.</p></div></div>
               </div>
             </section>
 

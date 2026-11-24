@@ -16,7 +16,7 @@ interface LoginRequest extends TenantEmailRequest {
   pin: string
 }
 
-/** A tenant the user can sign in to (`POST /api/v1/login/tenants`). */
+/** A tenant the user can sign in to (`POST /login/tenants`). */
 interface TenantOption {
   id: string
   name: string
@@ -77,7 +77,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
   }
 
   async requestPin(identity: TenantEmailRequest): Promise<void> {
-    const response = await this.post('/api/v1/login/pin', identity, {
+    const response = await this.post('/login/pin', identity, {
       authenticated: false,
       retryUnauthorized: false,
     })
@@ -88,7 +88,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
 
   /** Verifies the PIN and lists the tenants the user belongs to. Creates no session; finish with `login`. */
   async tenantChoices(email: string, pin: string): Promise<TenantOption[]> {
-    const response = await this.post('/api/v1/login/tenants', { email, pin }, {
+    const response = await this.post('/login/tenants', { email, pin }, {
       authenticated: false,
       retryUnauthorized: false,
     })
@@ -103,7 +103,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
   }
 
   async login(credentials: LoginRequest): Promise<void> {
-    const token = await this.tokenRequest('/api/v1/login', credentials)
+    const token = await this.tokenRequest('/login', credentials)
     this.state.accessToken = token.accessToken
     this.state.initialized = true
     storeTenant(credentials.tenantId)
@@ -114,7 +114,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
 
     this.refreshPromise = (async () => {
       try {
-        const token = await this.tokenRequest('/api/v1/auth/refresh')
+        const token = await this.tokenRequest('/auth/refresh')
         this.state.accessToken = token.accessToken
         return true
       } catch {
@@ -139,7 +139,7 @@ class AuthService extends BaseApiService implements ApiAuthentication {
 
   async logout(): Promise<void> {
     try {
-      await this.delete('/api/v1/auth/session', {
+      await this.delete('/auth/session', {
         authenticated: false,
         retryUnauthorized: false,
       })
