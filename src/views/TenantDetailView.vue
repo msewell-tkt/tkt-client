@@ -13,8 +13,9 @@ import TenantLogo from '../components/TenantLogo.vue'
 import { loadSession } from '../session'
 import { LOGO_TYPES, MAX_LOGO_BYTES, tenantService, type TenantDetail } from '../services/TenantService'
 import { userService } from '../services/UserService'
+import type { PrimaryUser } from '../services/BillingService'
 import type { InvitationResult, InvitationStatus } from '../services/InvitationService'
-import { userColor, userInitials, userName, userRoleNames, userStatus, type User, type UserStatus } from '../services/User'
+import { canBePrimaryUser, userColor, userInitials, userName, userRoleNames, userStatus, type User, type UserStatus } from '../services/User'
 import { formatTimestamp } from '../utils/workOrderFormat'
 
 const route = useRoute()
@@ -132,23 +133,15 @@ async function removeLogo() {
 const editOpen = ref(false)
 const archiveOpen = ref(false)
 const nameDraft = ref('')
-const subdomainDraft = ref('')
-/** What the typed subdomain will be saved as: lower case, spaces as dashes (the API checks the rest). */
-const subdomainPreview = computed(() => subdomainDraft.value.trim().toLowerCase().replace(/\s+/g, '-'))
-const subdomainValid = computed(() => /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(subdomainPreview.value) && subdomainPreview.value.length <= 63)
-const appDomain = (import.meta.env.VITE_APP_DOMAIN ?? '').replace(/^\./, '')
-const edited = computed(() => nameDraft.value.trim() !== tenant.value?.name || subdomainPreview.value !== (tenant.value?.subdomain ?? ''))
+const edited = computed(() => nameDraft.value.trim() !== tenant.value?.name)
 
 function saveEdit() {
-  const changes: { name?: string; subdomain?: string } = {}
-  if (nameDraft.value.trim() !== tenant.value?.name) changes.name = nameDraft.value
-  if (subdomainPreview.value !== (tenant.value?.subdomain ?? '')) changes.subdomain = subdomainPreview.value
-  return saveTenant(changes)
+  if (!nameDraft.value.trim() || !edited.value) return
+  return saveTenant({ name: nameDraft.value })
 }
 
 function openEdit() {
   nameDraft.value = tenant.value?.name ?? ''
-  subdomainDraft.value = tenant.value?.subdomain ?? ''
   actionError.value = ''
   editOpen.value = true
 }
@@ -169,6 +162,21 @@ async function saveTenant(changes: { name?: string; archived?: boolean }) {
   }
 }
 
+/** Makes an Admin of the tenant its primary user (billing contact). */
+async function makePrimary(target: User) {
+  if (busy.value) return
+  busy.value = true
+  actionError.value = ''
+  try {
+    const primary: PrimaryUser = await tenantService.setPrimaryUser(tenantId, target.id)
+    if (tenant.value) tenant.value.primaryUserId = primary.id
+  } catch (reason) {
+    actionError.value = reason instanceof Error ? reason.message : 'Unable to set the primary user.'
+  } finally {
+    busy.value = false
+  }
+}
+
 // Remove
 const removing = ref<User | null>(null)
 
@@ -182,6 +190,8 @@ async function removeUser() {
     users.value = users.value.filter((item) => item.id !== target.id)
     if (tenant.value) tenant.value.userCount = users.value.length
     removing.value = null
+    // Removing the primary user passes the role to another Admin, so look again.
+    tenant.value = { ...(await tenantService.detail(tenantId).catch(() => tenant.value!)), userCount: users.value.length }
   } catch (reason) {
     actionError.value = reason instanceof Error ? reason.message : 'Unable to remove the user.'
     removing.value = null
@@ -206,7 +216,7 @@ async function removeUser() {
           <div>
             <p class="mb-[.45rem] text-xs font-extrabold tracking-[.12em] text-[#5b63d3] uppercase">Tenant</p>
             <h1 class="m-0 text-[clamp(2rem,4vw,3rem)] leading-none tracking-[-.05em]">{{ tenant.name }}<Tag v-if="tenant.archived" value="Archived" severity="secondary" class="ml-3 align-middle" /></h1>
-            <p class="mt-3 mb-0 text-[#717b8f]"><span v-if="tenant.subdomain" class="font-mono">{{ tenant.subdomain }}</span><span v-else>No subdomain</span> · created {{ formatTimestamp(tenant.created ?? null) }} · {{ tenant.userCount }} active {{ tenant.userCount === 1 ? 'user' : 'users' }}</p>
+            <p class="mt-3 mb-0 text-[#717b8f]">Created {{ formatTimestamp(tenant.created ?? null) }} · {{ tenant.userCount }} active {{ tenant.userCount === 1 ? 'user' : 'users' }}</p>
           </div>
           <div class="flex flex-wrap gap-2">
             <Button label="Edit" icon="pi pi-pencil" severity="secondary" outlined :disabled="busy" @click="openEdit" />
@@ -249,6 +259,7 @@ async function removeUser() {
                       <div>
                         <RouterLink v-if="isCurrentTenant" :to="`/users/${user.id}`" class="block text-sm font-bold hover:underline">{{ userName(user) }}</RouterLink>
                         <strong v-else class="block text-sm">{{ userName(user) }}</strong>
+                        <Tag v-if="user.id === tenant.primaryUserId" value="Primary user" severity="info" class="mt-1" />
                         <span class="mt-1 block text-xs text-[#7d8698]">{{ user.email }}</span>
                       </div>
                     </div>
@@ -256,7 +267,7 @@ async function removeUser() {
                   <td class="px-4 py-4 text-sm font-semibold">{{ userRoleNames(user).join(', ') || '—' }}</td>
                   <td class="px-4 py-4"><Tag :value="userStatus(user)" :severity="statusSeverity(userStatus(user))" /></td>
                   <td class="px-4 py-4 text-sm text-[#697386]">{{ user.lastLogin ? formatTimestamp(user.lastLogin) : 'Never' }}</td>
-                  <td class="px-4 py-4 text-right"><Button icon="pi pi-user-minus" severity="danger" text rounded aria-label="Remove from tenant" :disabled="busy || user.id === currentUserId" :title="user.id === currentUserId ? 'You can’t remove yourself' : 'Remove from tenant'" @click="removing = user" /></td>
+                  <td class="px-4 py-4 text-right"><Button v-if="user.id !== tenant.primaryUserId" icon="pi pi-star" severity="secondary" text rounded aria-label="Make primary user" :disabled="busy || !canBePrimaryUser(user)" :title="canBePrimaryUser(user) ? 'Make primary user (billing contact)' : 'Only an active Admin can be the primary user'" @click="makePrimary(user)" /><Button icon="pi pi-user-minus" severity="danger" text rounded aria-label="Remove from tenant" :disabled="busy || user.id === currentUserId" :title="user.id === currentUserId ? 'You can’t remove yourself' : 'Remove from tenant'" @click="removing = user" /></td>
                 </tr>
               </tbody>
             </table>
@@ -269,14 +280,12 @@ async function removeUser() {
       <Dialog v-model:visible="editOpen" modal header="Edit tenant" :style="{ width: '30rem', maxWidth: 'calc(100vw - 2rem)' }">
         <form class="grid gap-4" @submit.prevent="saveEdit">
           <label class="grid gap-1 text-sm font-semibold">Name<InputText v-model="nameDraft" maxlength="45" autocomplete="off" required /></label>
-          <label class="grid gap-1 text-sm font-semibold">Subdomain<InputText v-model="subdomainDraft" maxlength="63" autocomplete="off" spellcheck="false" required :invalid="Boolean(subdomainDraft) && !subdomainValid" /></label>
-          <p class="m-0 text-xs text-[#7d8698]">Can differ from the name. Letters, numbers and dashes only; spaces become dashes. <template v-if="subdomainPreview && subdomainValid">Sign-in address: <strong class="font-mono">{{ subdomainPreview }}{{ appDomain ? `.${appDomain}` : '' }}</strong>. </template><template v-else-if="subdomainPreview">Not a valid subdomain. </template>Changing it changes the address people use, so update the DNS route to match.</p>
           <button type="submit" class="hidden" tabindex="-1" aria-hidden="true" />
         </form>
         <Message v-if="actionError" severity="error" :closable="false" class="mt-4">{{ actionError }}</Message>
         <template #footer>
           <Button label="Cancel" severity="secondary" text :disabled="busy" @click="editOpen = false" />
-          <Button label="Save" icon="pi pi-check" :loading="busy" :disabled="!nameDraft.trim() || !subdomainValid || !edited" @click="saveEdit" />
+          <Button label="Save" icon="pi pi-check" :loading="busy" :disabled="!nameDraft.trim() || !edited" @click="saveEdit" />
         </template>
       </Dialog>
 

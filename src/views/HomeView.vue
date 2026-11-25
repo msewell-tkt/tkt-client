@@ -48,19 +48,7 @@
         </section>
 
         <section class="mt-4 grid grid-cols-[1.35fr_.85fr] gap-4 max-[860px]:grid-cols-1">
-          <Card class="border border-[#e4e7ee] shadow-[0_8px_28px_rgba(30,41,75,.045)]">
-            <template #title><span class="flex items-center justify-between gap-3">Recent activity <Tag value="Sample data" severity="secondary" icon="pi pi-info-circle" /></span></template>
-            <template #subtitle>Activity isn’t available from the API yet</template>
-            <template #content>
-              <div class="grid">
-                <div v-for="item in activity" :key="item.title" class="grid grid-cols-[auto_1fr_auto] items-center gap-4 border-b border-[#edf0f5] py-4 last:border-0">
-                  <span :class="['grid h-[2.4rem] w-[2.4rem] place-items-center rounded-[.7rem]', item.color]"><i :class="item.icon" /></span>
-                  <div><strong class="text-[.9rem]">{{ item.title }}</strong><p class="mt-1 mb-0 text-[.8rem] text-[#7b8496]">{{ item.detail }}</p></div>
-                  <time class="text-xs text-[#9299a7]">{{ item.time }}</time>
-                </div>
-              </div>
-            </template>
-          </Card>
+          <RecentActivity />
 
           <Card class="border border-[#e4e7ee] shadow-[0_8px_28px_rgba(30,41,75,.045)]">
             <template #title>Current access</template>
@@ -93,17 +81,12 @@ import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
 import Tag from 'primevue/tag'
 import AppHeader from '../components/AppHeader.vue'
+import RecentActivity from '../components/RecentActivity.vue'
 import { dashboardService, type Session } from '../services/DashboardService'
 
 const loading = ref(true)
 const session = ref<Session | null>(null)
 const loadError = ref('')
-
-const activity = [
-  { icon: 'pi pi-check', color: 'bg-[#ddf7f0] text-[#148b75]', title: 'Inspection completed', detail: 'Riverside unit 4B', time: '12 min' },
-  { icon: 'pi pi-user-plus', color: 'bg-[#eceeff] text-[#5962d8]', title: 'Team member assigned', detail: 'Oak Street turnover', time: '1 hr' },
-  { icon: 'pi pi-file-edit', color: 'bg-[#fff3d9] text-[#bb7914]', title: 'Work order updated', detail: 'Heating service · #1842', time: '3 hrs' },
-]
 
 onMounted(async () => {
   try {

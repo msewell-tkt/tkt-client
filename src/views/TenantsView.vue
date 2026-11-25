@@ -35,7 +35,7 @@ watch(showArchived, load)
 
 const filtered = computed(() => {
   const term = search.value.trim().toLowerCase()
-  return tenants.value.filter((tenant) => !term || `${tenant.name} ${tenant.subdomain ?? ''}`.toLowerCase().includes(term))
+  return tenants.value.filter((tenant) => !term || tenant.name.toLowerCase().includes(term))
 })
 const totalUsers = computed(() => tenants.value.reduce((sum, tenant) => sum + tenant.userCount, 0))
 </script>
@@ -71,11 +71,10 @@ const totalUsers = computed(() => tenants.value.reduce((sum, tenant) => sum + te
 
           <div class="overflow-x-auto">
             <table class="w-full min-w-[640px] border-collapse text-left">
-              <thead class="bg-[#fafbfc] text-[.7rem] tracking-[.08em] text-[#7d8698] uppercase"><tr><th class="px-5 py-3.5">Tenant</th><th class="px-4 py-3.5">Subdomain</th><th class="px-4 py-3.5">Users</th><th class="px-4 py-3.5">Created</th><th class="w-12 px-4 py-3.5" /></tr></thead>
+              <thead class="bg-[#fafbfc] text-[.7rem] tracking-[.08em] text-[#7d8698] uppercase"><tr><th class="px-5 py-3.5">Tenant</th><th class="px-4 py-3.5">Users</th><th class="px-4 py-3.5">Created</th><th class="w-12 px-4 py-3.5" /></tr></thead>
               <tbody>
                 <tr v-for="tenant in filtered" :key="tenant.id" class="cursor-pointer border-t border-[#edf0f4] transition-colors hover:bg-[#f8f9fd]" @click="router.push(`/tenants/${tenant.id}`)">
                   <td class="px-5 py-4"><div class="flex items-center gap-3"><span class="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg border border-[#e6e9f2] bg-[#f6f7fb] text-[#8a93a5]"><img v-if="tenant.logoUpdated" :src="tenantService.logoUrl(tenant.id, tenant.logoUpdated)" alt="" class="h-full w-full object-contain"><i v-else class="pi pi-building text-sm" /></span><strong class="text-sm">{{ tenant.name }}</strong><Tag v-if="tenant.archived" value="Archived" severity="secondary" /></div></td>
-                  <td class="px-4 py-4 font-mono text-sm text-[#5f687b]">{{ tenant.subdomain || '—' }}</td>
                   <td class="px-4 py-4 text-sm">{{ tenant.userCount }}</td>
                   <td class="px-4 py-4 text-sm text-[#697386]">{{ formatTimestamp(tenant.created ?? null) }}</td>
                   <td class="px-4 py-4"><Button icon="pi pi-chevron-right" severity="secondary" text rounded aria-label="View tenant" /></td>

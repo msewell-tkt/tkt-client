@@ -19,7 +19,7 @@
           <h2 class="m-0 text-[1.8rem] tracking-[-.035em]">Welcome to {{ invitation.tenantName }}</h2>
           <p v-if="invitation.existingUser" class="mt-[.7rem] mb-6 leading-6 text-[#697386]">Your existing account now has access to this workspace. Sign in with a PIN to get started.</p>
           <p v-else class="mt-[.7rem] mb-6 leading-6 text-[#697386]">We sent a PIN to <strong>{{ invitation.email }}</strong>. Enter it on the sign-in page to finish setting up your account.</p>
-          <Button label="Continue to sign in" icon="pi pi-arrow-right" icon-pos="right" fluid @click="goToLogin" />
+          <Button label="Continue to sign in" icon="pi pi-arrow-right" icon-pos="right" :loading="signingOut" fluid @click="goToLogin" />
         </template>
 
         <template v-else-if="invitation">
@@ -53,6 +53,7 @@ import Card from 'primevue/card'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
+import { auth } from '../auth'
 import { invitationService, type InvitationView } from '../services/InvitationService'
 
 const route = useRoute()
@@ -62,6 +63,7 @@ const invitation = ref<InvitationView | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const submitting = ref(false)
+const signingOut = ref(false)
 const error = ref('')
 const done = ref(false)
 const form = ref({ firstName: '', lastName: '', phone: '', mobile: '' })
@@ -92,9 +94,13 @@ async function submit() {
   }
 }
 
-function goToLogin() {
+// Any session still open here would send the login route straight home, so it is signed out first.
+async function goToLogin() {
   const current = invitation.value
-  if (!current) return
-  void router.push({ name: 'login', query: { tenantId: current.tenantId, email: current.email, ...(current.existingUser ? {} : { pinSent: '1' }) } })
+  if (!current || signingOut.value) return
+  signingOut.value = true
+  // A failed request still drops this page's session, so carry on to sign-in.
+  await auth.logout().catch(() => {})
+  await router.push({ name: 'login', query: { tenantId: current.tenantId, email: current.email, ...(current.existingUser ? {} : { pinSent: '1' }) } })
 }
 </script>

@@ -28,6 +28,21 @@
       </RouterLink>
     </nav>
 
+    <Select
+      v-if="tenants.length > 1"
+      :model-value="tenantId"
+      :options="tenants"
+      option-label="name"
+      option-value="id"
+      :filter="tenants.length > 8"
+      :loading="switching"
+      :disabled="switching || signingOut"
+      aria-label="Workspace"
+      class="w-[13rem] min-w-0 max-[800px]:w-[9rem] max-[520px]:w-[7rem]"
+      @update:model-value="switchTenant"
+    />
+    <Message v-if="switchError" severity="error" closable class="absolute top-[76px] right-4" @close="switchError = ''">{{ switchError }}</Message>
+
     <Button
       icon="pi pi-sign-out"
       label="Sign out"
@@ -44,8 +59,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
-import { auth } from '../auth'
+import Message from 'primevue/message'
+import Select from 'primevue/select'
+import { auth, type TenantOption } from '../auth'
 import { RoleEnum } from '../constants/roles'
+import { tenantSwitchService } from '../services/TenantSwitchService'
 import { loadSession } from '../session'
 import TenantLogo from './TenantLogo.vue'
 
@@ -70,6 +88,29 @@ onMounted(async () => {
     // The header still works without the session; it just shows the default brand and hides admin links.
   }
 })
+
+const tenants = ref<TenantOption[]>([])
+const switching = ref(false)
+const switchError = ref('')
+onMounted(async () => {
+  // Without the list there is just no switcher.
+  tenants.value = await tenantSwitchService.mine().catch(() => [])
+})
+
+async function switchTenant(id: string) {
+  if (!id || id === tenantId.value || switching.value) return
+  switching.value = true
+  switchError.value = ''
+  try {
+    await tenantSwitchService.switchTo(id)
+    // A full load, so nothing of the previous workspace stays on screen and the menu follows the new roles.
+    window.location.assign('/')
+  } catch (reason) {
+    switchError.value = reason instanceof Error ? reason.message : 'Unable to switch workspaces.'
+    switching.value = false
+  }
+}
+
 const visibleLinks = computed(() => links.filter((link) => !link.superAdmin || superAdmin.value))
 
 const route = useRoute()

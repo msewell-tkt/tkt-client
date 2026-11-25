@@ -7,12 +7,9 @@ interface TokenResponse {
   expiresIn: number
 }
 
-interface TenantEmailRequest {
+interface LoginRequest {
   email: string
   tenantId: string
-}
-
-interface LoginRequest extends TenantEmailRequest {
   pin: string
 }
 
@@ -20,7 +17,6 @@ interface LoginRequest extends TenantEmailRequest {
 interface TenantOption {
   id: string
   name: string
-  subdomain: string
 }
 
 const TENANT_STORAGE_KEY = 'tkt-last-tenant-id'
@@ -66,6 +62,11 @@ class AuthService extends BaseApiService implements ApiAuthentication {
     return readStoredTenant()
   }
 
+  /** Records the tenant this browser is now signed in to (other open tabs notice, see below). */
+  rememberTenant(tenantId: string) {
+    storeTenant(tenantId)
+  }
+
   /** Registers what happens when the session can no longer be refreshed (the router sends the user to login). */
   setSessionExpiredHandler(handler: () => void) {
     this.sessionExpiredHandler = handler
@@ -76,8 +77,8 @@ class AuthService extends BaseApiService implements ApiAuthentication {
     this.sessionExpiredHandler?.()
   }
 
-  async requestPin(identity: TenantEmailRequest): Promise<void> {
-    const response = await this.post('/login/pin', identity, {
+  async requestPin(email: string): Promise<void> {
+    const response = await this.post('/login/pin', { email }, {
       authenticated: false,
       retryUnauthorized: false,
     })
@@ -166,4 +167,10 @@ class AuthService extends BaseApiService implements ApiAuthentication {
 
 export const auth = new AuthService()
 
-export type { LoginRequest, TenantEmailRequest, TenantOption }
+// The refresh cookie is shared by every tab. When another tab moves to a different workspace, a signed-in tab would
+// carry on showing the old one and then silently receive the new one's data, so it starts over instead.
+window.addEventListener('storage', (event) => {
+  if (event.key === TENANT_STORAGE_KEY && event.newValue && auth.isAuthenticated.value) window.location.assign('/')
+})
+
+export type { LoginRequest, TenantOption }

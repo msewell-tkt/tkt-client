@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
@@ -23,9 +24,13 @@ const loadError = ref('')
 const total = ref(0)
 const properties = ref<Property[]>([])
 const statusOptions = ref<string[]>([ALL_STATUSES])
-const drawerOpen = ref(false)
+const route = useRoute()
+const router = useRouter()
+/** A work order named in the address (`?order=`, as recent activity links to it) opens straight away. */
+const linkedId = typeof route.query.order === 'string' && route.query.order ? route.query.order : null
+const drawerOpen = ref(Boolean(linkedId))
 /** Work order shown in the drawer; null creates a new one. */
-const editingId = ref<string | null>(null)
+const editingId = ref<string | null>(linkedId)
 const workOrders = ref<WorkOrder[]>([])
 
 let loadSeq = 0
@@ -59,6 +64,10 @@ onMounted(() => {
   void loadOrders()
   workOrderService.statuses().then((values) => { statusOptions.value = [ALL_STATUSES, ...values] }).catch(() => {})
   propertyService.list().then((view) => { properties.value = view.properties }).catch(() => {})
+})
+// Once closed, a reload shouldn't reopen the linked work order.
+watch(drawerOpen, (open) => {
+  if (!open && route.query.order) void router.replace({ query: { ...route.query, order: undefined } })
 })
 watch([statusFilter, propertyFilter], () => void loadOrders())
 watch(query, () => {

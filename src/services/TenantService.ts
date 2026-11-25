@@ -1,13 +1,13 @@
 import { BaseApiService, type ApiAuthentication } from './BaseApiService'
 import { auth } from '../auth'
 import type { InvitationResult } from './InvitationService'
+import type { PrimaryUser } from './BillingService'
 import type { User } from './User'
 
-/** What the login page needs to know about a workspace (`GET /tenants/by-subdomain/{subdomain}`). */
+/** The basic details of a workspace. */
 export interface TenantSummary {
   id: string
   name: string
-  subdomain: string
   /** When the logo was set; null when the tenant has none. */
   logoUpdated?: string | null
 }
@@ -21,6 +21,8 @@ export interface TenantDetail extends TenantSummary {
   archived: boolean
   created: string | null
   userCount: number
+  /** The tenant's billing contact (an Admin of it); null when it has none. */
+  primaryUserId?: string | null
 }
 
 class TenantService extends BaseApiService {
@@ -28,7 +30,6 @@ class TenantService extends BaseApiService {
     super(authentication)
   }
 
-  /** The tenant served from `subdomain`, or null when there is none. Anonymous. */
   /** The active tenants, or only the archived ones (`GET /tenants`). Super Admin only. */
   async list(archived = false): Promise<TenantDetail[]> {
     const payload = await this.data<TenantDetail[] | null>(await this.get(archived ? '/tenants?archived=true' : '/tenants'), 'Couldn’t load workspaces.')
@@ -60,8 +61,13 @@ class TenantService extends BaseApiService {
   }
 
   /** Changes the tenant's name and/or archived flag (`POST /tenants/{id}`). Super Admin only. */
-  async update(tenantId: string, changes: { name?: string; subdomain?: string; archived?: boolean }): Promise<TenantDetail> {
+  async update(tenantId: string, changes: { name?: string; archived?: boolean }): Promise<TenantDetail> {
     return this.data<TenantDetail>(await this.post(`/tenants/${tenantId}`, changes), 'Unable to save the workspace.')
+  }
+
+  /** Makes an active Admin of the tenant its primary user (`POST /tenants/{id}/primary-user`). Super Admin only. */
+  async setPrimaryUser(tenantId: string, userId: string): Promise<PrimaryUser> {
+    return this.data<PrimaryUser>(await this.post(`/tenants/${tenantId}/primary-user`, { userId }), 'Unable to set the primary user.')
   }
 
   /** The tenant's users with their roles there (`GET /tenants/{id}/users`). Super Admin only. */
@@ -74,12 +80,6 @@ class TenantService extends BaseApiService {
   async invite(tenantId: string, emails: string[]): Promise<InvitationResult[]> {
     const payload = await this.data<InvitationResult[] | null>(await this.post(`/tenants/${tenantId}/invitations`, { emails }), 'Unable to send the invitations.')
     return Array.isArray(payload) ? payload : []
-  }
-
-  async bySubdomain(subdomain: string): Promise<TenantSummary | null> {
-    const response = await this.get(`/public/tenants/by-subdomain/${encodeURIComponent(subdomain)}`, { authenticated: false })
-    if (response.status === 404) return null
-    return this.data<TenantSummary>(response, 'Couldn’t look up this workspace.')
   }
 }
 

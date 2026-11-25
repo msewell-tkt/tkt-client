@@ -20,7 +20,7 @@
           <h2 class="m-0 text-[1.8rem] tracking-[-.035em]">{{ result.tenantName }} is ready</h2>
           <p v-if="result.existingUser" class="mt-[.7rem] mb-6 leading-6 text-[#697386]">Your existing account is now the administrator of this workspace. Sign in with a PIN to get started, then invite your team from the Users page.</p>
           <p v-else class="mt-[.7rem] mb-6 leading-6 text-[#697386]">We sent a PIN to <strong>{{ result.email }}</strong>. Enter it on the sign-in page, then invite your team from the Users page.</p>
-          <Button :label="`Continue to ${loginHost(result.loginUrl)}`" icon="pi pi-arrow-right" icon-pos="right" fluid @click="goToLogin" />
+          <Button label="Continue to sign in" icon="pi pi-arrow-right" icon-pos="right" :loading="signingOut" fluid @click="goToLogin" />
         </template>
 
         <template v-else-if="registration">
@@ -37,20 +37,23 @@
 
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { RouterLink, useRoute, useRouter } from 'vue-router'
 import Button from 'primevue/button'
 import Card from 'primevue/card'
 import Message from 'primevue/message'
 import ProgressSpinner from 'primevue/progressspinner'
+import { auth } from '../auth'
 import { tenantRegistrationService, type TenantRegistrationResult, type TenantRegistrationView } from '../services/TenantRegistrationService'
 
 const route = useRoute()
+const router = useRouter()
 const token = typeof route.query.token === 'string' ? route.query.token : ''
 const registration = ref<TenantRegistrationView | null>(null)
 const result = ref<TenantRegistrationResult | null>(null)
 const loading = ref(true)
 const loadError = ref('')
 const submitting = ref(false)
+const signingOut = ref(false)
 const error = ref('')
 
 onMounted(async () => {
@@ -78,18 +81,13 @@ async function confirm() {
   }
 }
 
-function loginHost(loginUrl: string) {
-  return new URL(loginUrl).host
-}
-
-function goToLogin() {
+// Any session still open here would send the login route straight home, so it is signed out first.
+async function goToLogin() {
   const done = result.value
-  if (!done) return
-  // The workspace now has its own subdomain, so leave this host: a full navigation, not a router push.
-  const url = new URL(done.loginUrl)
-  url.searchParams.set('tenantId', done.tenantId)
-  url.searchParams.set('email', done.email)
-  if (!done.existingUser) url.searchParams.set('pinSent', '1')
-  window.location.assign(url.toString())
+  if (!done || signingOut.value) return
+  signingOut.value = true
+  // A failed request still drops this page's session, so carry on to sign-in.
+  await auth.logout().catch(() => {})
+  await router.push({ name: 'login', query: { tenantId: done.tenantId, email: done.email, ...(done.existingUser ? {} : { pinSent: '1' }) } })
 }
 </script>

@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { auth } from './auth'
-import { isSuperAdmin, sessionMatchesHost } from './session'
-import { resolveHostTenant } from './hostTenant'
+import { isSuperAdmin } from './session'
 import HomeView from './views/HomeView.vue'
 import LoginView from './views/LoginView.vue'
 
@@ -66,15 +65,6 @@ router.beforeEach(async (to) => {
   await auth.initialize()
   if (to.meta.requiresAuth && !auth.isAuthenticated.value) {
     return { name: 'login', query: { redirect: to.fullPath, tenantId: loginTenantId(to.query) } }
-  }
-  // A session of another tenant (restored by the shared refresh cookie) must not be used at this tenant's address:
-  // send the user to this tenant's sign-in instead, which says what happened.
-  if (auth.isAuthenticated.value && !(await sessionMatchesHost())) {
-    if (to.meta.requiresAuth) {
-      const host = await resolveHostTenant()
-      return { name: 'login', query: { redirect: to.fullPath, tenantId: host?.id } }
-    }
-    return
   }
   if (to.name === 'login' && auth.isAuthenticated.value) return { name: 'home' }
   // The API enforces this too; the check just keeps everyone else off pages that would only show errors.

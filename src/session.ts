@@ -1,7 +1,6 @@
 import { watch } from 'vue'
 import { auth } from './auth'
 import { RoleEnum } from './constants/roles'
-import { hostLookupFailed, hostSubdomain, resolveHostTenant } from './hostTenant'
 import { dashboardService, type Session } from './services/DashboardService'
 
 let cached: Promise<Session> | null = null
@@ -25,24 +24,6 @@ export function loadSession(): Promise<Session> {
 /** Forget the cached session, after a sign-in as someone else (a sign-out does this by itself). */
 export function resetSession() {
   cached = null
-}
-
-/**
- * Whether the signed-in session belongs to the tenant this address serves. The refresh cookie is shared by every
- * tenant subdomain, so opening another tenant's address can restore a session of the first. That session is valid
- * but does not belong here, and neither does any session at a subdomain no tenant uses. Anything we cannot judge (not a
- * tenant address, a failed lookup) counts as matching.
- */
-export async function sessionMatchesHost(): Promise<boolean> {
-  if (!hostSubdomain()) return true
-  const host = await resolveHostTenant()
-  // A subdomain no tenant uses has no session that belongs to it; a failed lookup is not an answer, so assume it does.
-  if (!host) return hostLookupFailed()
-  try {
-    return (await loadSession()).tid === host.id
-  } catch {
-    return true
-  }
 }
 
 export async function isSuperAdmin(): Promise<boolean> {

@@ -89,6 +89,8 @@ const saving = ref(false)
 const deleting = ref(false)
 const deleteOpen = ref(false)
 const deleteJobOpen = ref(false)
+const cancelJobOpen = ref(false)
+const canceling = ref(false)
 const detailLoading = ref(false)
 const saveError = ref('')
 const serviceItemsByProperty = ref<Record<string, ServiceItem[]>>({})
@@ -330,6 +332,29 @@ async function deleteJob() {
   } finally {
     deleteJobOpen.value = false
     deleting.value = false
+  }
+}
+
+/** A saved job that has not already been canceled can be canceled; it stays on the order, marked Canceled, and drops out of the open queues. */
+const canCancelJob = computed(() => !!activeJob.value?.saved && !!activeJob.value.source && activeJob.value.status !== StatusEnum.CANCELED)
+
+async function cancelJob() {
+  const order = editing.value
+  const job = activeJob.value
+  if (!order || !job || !job.source || !job.saved || canceling.value) return
+  canceling.value = true
+  saveError.value = ''
+  try {
+    // only the status changes; edits to other fields on the draft are saved with the work order, not here
+    await workOrderService.updateJob(order.id, { ...job.source, status: StatusEnum.CANCELED })
+    const detail = await workOrderService.detail(order.id)
+    showOrder(fromOrder(detail), job.id)
+    emit('saved', detail)
+  } catch (reason) {
+    saveError.value = reason instanceof Error ? reason.message : 'Unable to cancel the job.'
+  } finally {
+    cancelJobOpen.value = false
+    canceling.value = false
   }
 }
 
@@ -631,7 +656,7 @@ async function removeAttachment(id: string) {
             </section>
   
             <section v-else-if="activeJob">
-              <div class="mb-5 flex items-start justify-between gap-4"><div><h3 class="m-0 text-xl tracking-[-.03em]">{{ jobName(activeJob) }}</h3><p class="mt-1 mb-0 text-sm text-[#7d8697]">{{ assignee(activeJob) }} · {{ formatDate(activeJob.scheduled) }}</p></div><Button type="button" icon="pi pi-trash" label="Remove job" severity="danger" text size="small" :disabled="editing.jobs.length === 1" @click="removeJob" /></div>
+              <div class="mb-5 flex items-start justify-between gap-4"><div><h3 class="m-0 text-xl tracking-[-.03em]">{{ jobName(activeJob) }}</h3><p class="mt-1 mb-0 text-sm text-[#7d8697]">{{ assignee(activeJob) }} · {{ formatDate(activeJob.scheduled) }}</p></div><div class="flex items-center gap-1"><Button v-if="canCancelJob" type="button" icon="pi pi-ban" label="Cancel job" severity="secondary" text size="small" @click="cancelJobOpen = true" /><Button type="button" icon="pi pi-trash" label="Remove job" severity="danger" text size="small" :disabled="editing.jobs.length === 1" @click="removeJob" /></div></div>
   
               <nav class="mb-6 flex gap-1 overflow-x-auto rounded-xl bg-[#f3f5f8] p-1" aria-label="Job sections">
                 <button v-for="section in jobSections" :key="section.value" type="button" :class="['flex shrink-0 items-center gap-2 rounded-lg border-0 px-3 py-2.5 text-[.76rem] font-bold', activeJobSection === section.value ? 'bg-white text-[#5962d8] shadow-sm' : 'bg-transparent text-[#747e91] hover:text-[#3f485b]']" @click="activeJobSection = section.value"><i :class="['pi', section.icon]" />{{ section.label }}<span v-if="section.value === 'notes'" class="rounded-full bg-[#e9ebf2] px-1.5 py-0.5 text-[.62rem] text-[#626b7d]">{{ activeJob.notes.length }}</span><span v-else-if="section.value === 'items'" class="rounded-full bg-[#e9ebf2] px-1.5 py-0.5 text-[.62rem] text-[#626b7d]">{{ activeJob.extras.length }}</span><span v-else-if="section.value === 'attachments'" class="rounded-full bg-[#e9ebf2] px-1.5 py-0.5 text-[.62rem] text-[#626b7d]">{{ activeJob.attachments.length }}</span></button>
@@ -670,6 +695,11 @@ async function removeAttachment(id: string) {
             <div class="mt-8 flex items-center justify-end gap-3 border-t border-[#e8ebf1] pt-5"><span v-if="saved" class="mr-auto text-xs font-bold text-[#138c74]"><i class="pi pi-check-circle mr-1" /> Saved</span><Button v-if="!isNew(editing.id)" type="button" icon="pi pi-trash" label="Delete" severity="danger" text :disabled="saving || detailLoading" @click="deleteOpen = true" /><Button type="button" label="Cancel" severity="secondary" text @click="visible = false" /><Button type="submit" icon="pi pi-check" :label="isNew(editing.id) ? 'Create work order' : 'Save work order'" :loading="saving" :disabled="detailLoading || !editing.property" /></div>
           </form>
         </template>
+
+    <Dialog v-model:visible="cancelJobOpen" modal header="Cancel job?" :style="{ width: '28rem' }">
+      <p class="mt-0 leading-6 text-[#667085]"><strong>{{ activeJob ? jobName(activeJob) : '' }}</strong> will be marked Canceled. It stays on the work order and in its status history, but leaves the unscheduled queue and the technician’s open jobs.</p>
+      <template #footer><Button label="Keep job" severity="secondary" text :disabled="canceling" @click="cancelJobOpen = false" /><Button label="Cancel job" severity="danger" :loading="canceling" @click="cancelJob" /></template>
+    </Dialog>
 
     <Dialog v-model:visible="deleteJobOpen" modal header="Delete job?" :style="{ width: '28rem' }">
       <p class="mt-0 leading-6 text-[#667085]"><strong>{{ activeJob ? jobName(activeJob) : '' }}</strong> will be permanently deleted from this work order. This can’t be undone.</p>

@@ -17,14 +17,10 @@ export interface TenantRegistrationView {
   expiresAt: string
 }
 
-/** Where to sign in once the email is confirmed. A new user has been emailed a PIN; an existing one has not. */
+/** The workspace created once the email is confirmed. A new user has been emailed a PIN; an existing one has not. */
 export interface TenantRegistrationResult {
   tenantId: string
   tenantName: string
-  /** Host label derived from the tenant name; the workspace lives at `<subdomain>.<app domain>`. */
-  subdomain: string
-  /** The new workspace's own login page, on its subdomain. */
-  loginUrl: string
   email: string
   existingUser: boolean
 }

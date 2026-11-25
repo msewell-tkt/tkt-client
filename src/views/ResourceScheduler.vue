@@ -3,20 +3,25 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Button from 'primevue/button'
 import Dialog from 'primevue/dialog'
 import Drawer from 'primevue/drawer'
+import InputText from 'primevue/inputtext'
 import Message from 'primevue/message'
+import MultiSelect from 'primevue/multiselect'
 import ProgressSpinner from 'primevue/progressspinner'
 import Select from 'primevue/select'
 import Tag from 'primevue/tag'
 import Textarea from 'primevue/textarea'
 import ToggleSwitch from 'primevue/toggleswitch'
 import AppHeader from '../components/AppHeader.vue'
+import UserDetail from '../components/UserDetail.vue'
 import WorkOrderDrawer from '../components/WorkOrderDrawer.vue'
 import { INITIAL_STATUS, StatusEnum } from '../constants/jobStatus'
-import { schedulerService, type ScheduleJob, type ScheduleUser } from '../services/SchedulerService'
+import { RoleEnum } from '../constants/roles'
+import { loadSession } from '../session'
+import { schedulerService, type ScheduleEvent, type ScheduleJob, type ScheduleUser } from '../services/SchedulerService'
 
-type JobTone = 'scheduled' | 'active' | 'ready' | 'event'
+type JobTone = 'scheduled' | 'active' | 'ready'
 
-/** One card: a job from the API (scheduled or in the unscheduled queue), or a local note. */
+/** One card: a job from the API, scheduled or in the unscheduled queue. */
 interface ScheduleItem {
   id: string
   /** null while the job sits in the unscheduled queue. */
@@ -33,7 +38,7 @@ interface ScheduleItem {
   alert: boolean
   dispatched: boolean
   updatedByTech: boolean
-  source: ScheduleJob | null
+  source: ScheduleJob
 }
 
 interface Resource {
@@ -43,7 +48,6 @@ interface Resource {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000
-const ALL_TYPES = 'All types'
 /** Time of day given to a job dropped from the queue when it has no scheduled time yet. */
 const DEFAULT_START_HOUR = 8
 
@@ -64,8 +68,8 @@ function writePreference(key: string, value: string) {
 }
 
 const weekStart = ref(startOfWeek(new Date()))
-/** Selected user type name; ALL_TYPES means no filter. Sent to the API as `userType`. */
-const userType = ref(ALL_TYPES)
+/** Selected user type names; none means no filter. */
+const selectedUserTypes = ref<string[]>([])
 const userTypes = ref<string[]>([])
 const hideSunday = ref(readPreference('scheduler-show-sunday') !== 'true')
 const hideSaturday = ref(readPreference('scheduler-hide-saturday') === 'true')
@@ -81,23 +85,34 @@ const orderOpen = ref(false)
 const orderId = ref<string | null>(null)
 const draggedJobId = ref<string | null>(null)
 const selectedJob = ref<ScheduleItem | null>(null)
+/** The note being edited; null while adding a new one. */
+const eventId = ref<string | null>(null)
 const eventResource = ref<string | null>(null)
-const eventDay = ref<number | null>(null)
+/** `YYYY-MM-DD` values of the date inputs; `eventEnd` empty means a one-day note. */
+const eventStart = ref('')
+const eventEnd = ref('')
 const eventNote = ref('')
+const eventSaving = ref(false)
+const eventError = ref('')
+const eventConfirmDelete = ref(false)
+
+/** The team member whose details are open in the side panel. */
+const openUserId = ref<string | null>(null)
+/** The API only lets Admins and Super Admins read and change other users. */
+const canViewUsers = ref(false)
 
 const loading = ref(true)
 const loadError = ref('')
 const resources = ref<Resource[]>([])
 const jobs = ref<ScheduleItem[]>([])
-/** Notes added in this browser. The API has no endpoint to save them yet. */
-const localChanges = ref(0)
+/** The week's notes from the API. A note covering several days shows in each of them. */
+const events = ref<ScheduleEvent[]>([])
 let loadSequence = 0
 
 const jobToneClasses: Record<JobTone, string> = {
   active: 'bg-[#72dcad]',
   scheduled: 'bg-[#a9e7ef]',
   ready: 'bg-[#f2e85d]',
-  event: 'cursor-default bg-white',
 }
 
 function jobClasses(item: ScheduleItem) {
@@ -109,8 +124,6 @@ function jobClasses(item: ScheduleItem) {
     item.saving ? 'animate-pulse cursor-wait' : '',
   ]
 }
-
-const userTypeOptions = computed(() => [ALL_TYPES, ...userTypes.value])
 
 const visibleResources = computed(() => resources.value)
 
@@ -182,7 +195,9 @@ function dayIndex(iso: string | null): number | null {
 const STATUS_TONES: Partial<Record<string, JobTone>> = {
   [StatusEnum.CONFIRMED]: 'active',
   [StatusEnum.DONE]: 'ready',
-  [StatusEnum.REVIEW]: 'ready',
+  [StatusEnum.SERVICED]: 'ready',
+  [StatusEnum.REVIEWED]: 'ready',
+  [StatusEnum.READY_TO_BILL]: 'ready',
   [StatusEnum.INVOICED]: 'ready',
   [StatusEnum.COMPLETE]: 'ready',
 }
@@ -226,7 +241,7 @@ async function loadWeek(silent = false) {
   }
   try {
     const [users, unscheduled] = await Promise.all([
-      schedulerService.weekly(weekStart.value, userType.value === ALL_TYPES ? undefined : userType.value),
+      schedulerService.weekly(weekStart.value, selectedUserTypes.value),
       schedulerService.unscheduled(),
     ])
     if (sequence !== loadSequence) return
@@ -241,12 +256,13 @@ async function loadWeek(silent = false) {
     jobs.value.push(...unscheduled
       .map((job) => toItem(job, null))
       .filter((item): item is ScheduleItem => item !== null))
-    localChanges.value = 0
+    events.value = users.flatMap((user) => user.schedulerEvents ?? [])
   } catch (reason) {
     if (sequence !== loadSequence || silent) return
     loadError.value = reason instanceof Error ? reason.message : 'Couldn’t load the schedule.'
     resources.value = []
     jobs.value = []
+    events.value = []
   } finally {
     if (sequence === loadSequence) loading.value = false
   }
@@ -277,7 +293,7 @@ function goToToday() {
 }
 
 function startDrag(item: ScheduleItem, event: DragEvent) {
-  if (item.tone === 'event' || item.saving) {
+  if (item.saving) {
     event.preventDefault()
     return
   }
@@ -402,21 +418,85 @@ function onOrderSaved() {
   void loadWeek()
 }
 
+/** `YYYY-MM-DD` of a local date, the format of the API's note dates and of date inputs. */
+function isoDate(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+/** Local midnight of an API date such as `2026-11-25`. */
+function parseDate(value: string) {
+  const [year, month, day] = value.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
+/** Notes on a team member's row that cover the given day of the week (ISO dates compare as text). */
+function eventsFor(resourceId: string, day: number) {
+  const date = isoDate(dateForDay(day))
+  return events.value.filter((note) => note.userId === resourceId && note.startDate <= date && date <= note.endDate)
+}
+
+function noteTitle(note: ScheduleEvent) {
+  const first = formatShortDate(parseDate(note.startDate))
+  return note.endDate === note.startDate ? `${note.name}\n${first}` : `${note.name}\n${first} – ${formatShortDate(parseDate(note.endDate))}`
+}
+
 function openEventDialog() {
+  eventId.value = null
   eventResource.value = visibleResources.value[0]?.id ?? null
-  eventDay.value = visibleDays.value[0] ?? 1
+  eventStart.value = isoDate(dateForDay(visibleDays.value[0] ?? 1))
+  eventEnd.value = ''
   eventNote.value = ''
+  eventError.value = ''
+  eventConfirmDelete.value = false
   eventOpen.value = true
 }
 
-function saveEvent() {
-  if (!eventResource.value || eventDay.value === null || !eventNote.value.trim()) return
-  jobs.value.push({
-    id: `note-${Date.now()}`, resourceId: eventResource.value, day: eventDay.value, priority: Number.MAX_SAFE_INTEGER, saving: false, property: eventNote.value.trim(),
-    detail: '', status: 'Note', tone: 'event', alert: false, dispatched: false, updatedByTech: false, source: null,
-  })
-  localChanges.value += 1
-  eventOpen.value = false
+function editEvent(note: ScheduleEvent) {
+  eventId.value = note.id
+  eventResource.value = note.userId
+  eventStart.value = note.startDate
+  eventEnd.value = note.endDate === note.startDate ? '' : note.endDate
+  eventNote.value = note.name
+  eventError.value = ''
+  eventConfirmDelete.value = false
+  eventOpen.value = true
+}
+
+const eventValid = computed(() => !!eventResource.value && !!eventStart.value && !!eventNote.value.trim()
+  && (!eventEnd.value || eventEnd.value >= eventStart.value))
+
+async function saveEvent() {
+  if (!eventValid.value || !eventResource.value || eventSaving.value) return
+  const body = { userId: eventResource.value, name: eventNote.value.trim(), startDate: eventStart.value, endDate: eventEnd.value || null }
+  eventSaving.value = true
+  eventError.value = ''
+  try {
+    if (eventId.value) await schedulerService.updateEvent(eventId.value, body)
+    else await schedulerService.createEvent(body)
+    eventOpen.value = false
+    await loadWeek(true)
+  } catch (reason) {
+    eventError.value = reason instanceof Error ? reason.message : 'Unable to save the note.'
+  } finally {
+    eventSaving.value = false
+  }
+}
+
+async function deleteEvent() {
+  if (!eventId.value || eventSaving.value) return
+  eventSaving.value = true
+  eventError.value = ''
+  try {
+    await schedulerService.deleteEvent(eventId.value)
+    eventOpen.value = false
+    await loadWeek(true)
+  } catch (reason) {
+    eventError.value = reason instanceof Error ? reason.message : 'Unable to delete the note.'
+  } finally {
+    eventConfirmDelete.value = false
+    eventSaving.value = false
+  }
 }
 
 async function sendSchedule() {
@@ -443,7 +523,7 @@ async function loadUserTypes() {
   try {
     userTypes.value = (await schedulerService.userTypes()).map((type) => type.name).filter(Boolean)
   } catch {
-    // The filter just offers "All types" if the list can't be loaded.
+    // The filter has nothing to offer if the list can't be loaded.
     userTypes.value = []
   }
 }
@@ -454,15 +534,25 @@ let refreshTimer: number | undefined
 /** Skips a tick while the page is hidden or the user is mid-action, so nothing is overwritten. */
 function autoRefresh() {
   if (document.hidden || loading.value || sending.value || draggedJobId.value) return
-  if (orderOpen.value || eventOpen.value || localChanges.value > 0) return
+  if (orderOpen.value || eventOpen.value || openUserId.value) return
   if (jobs.value.some((item) => item.saving)) return
   void loadWeek(true)
 }
 
-watch([weekStart, userType], () => loadWeek())
+/** Closes the user panel and picks up anything changed there (name, roles, user types, removal). */
+function closeUser() {
+  openUserId.value = null
+  void loadWeek(true)
+  void loadUserTypes()
+}
+
+watch([weekStart, selectedUserTypes], () => loadWeek())
 onMounted(() => {
   void loadUserTypes()
   void loadWeek()
+  loadSession()
+    .then((session) => { canViewUsers.value = session.roles.some((role) => role === RoleEnum.ADMIN || role === RoleEnum.SUPER_ADMIN) })
+    .catch(() => {})
   refreshTimer = window.setInterval(autoRefresh, REFRESH_INTERVAL_MS)
 })
 onBeforeUnmount(() => window.clearInterval(refreshTimer))
@@ -488,7 +578,7 @@ onBeforeUnmount(() => window.clearInterval(refreshTimer))
           <Button icon="pi pi-chevron-right" severity="secondary" text rounded aria-label="Next week" @click="shiftWeek(1)" />
         </div>
         <div class="flex items-center gap-1 max-[900px]:flex-wrap max-[900px]:[&_.p-button:last-child]:flex-1">
-          <Select v-model="userType" :options="userTypeOptions" class="w-40" aria-label="Filter by user type" />
+          <MultiSelect v-model="selectedUserTypes" :options="userTypes" :max-selected-labels="1" selected-items-label="{0} types" placeholder="All types" :filter="userTypes.length > 8" show-clear class="w-48" aria-label="Filter by user type" />
           <Button icon="pi pi-cog" severity="secondary" text rounded aria-label="Preferences" @click="settingsOpen = true" />
           <Button icon="pi pi-plus" label="New work order" severity="secondary" outlined @click="newWorkOrder" />
           <Button icon="pi pi-file-edit" severity="secondary" text rounded aria-label="Add schedule note" @click="openEventDialog" />
@@ -497,16 +587,12 @@ onBeforeUnmount(() => window.clearInterval(refreshTimer))
         </div>
       </section>
 
-      <div v-if="localChanges" class="mx-auto flex max-w-[1800px] items-center justify-between gap-4 border border-b-0 border-[#f1d9a6] bg-[#fff8e8] px-4 py-[.55rem] text-[.86rem] font-semibold text-[#8a5a00]" role="status">
-        <span><i class="pi pi-exclamation-triangle mr-[.4rem]" />{{ localChanges }} unsaved {{ localChanges === 1 ? 'note' : 'notes' }}. Notes stay in this browser; the API can’t save them yet.</span>
-        <Button label="Discard" size="small" severity="secondary" text @click="loadWeek()" />
-      </div>
       <div v-if="notice" :class="['mx-auto max-w-[1800px] border border-b-0 px-4 py-[.7rem] text-[.86rem] font-semibold', notice.severity === 'success' ? 'border-[#afe2d7] bg-[#e8faf5] text-[#08745f]' : 'border-[#f0c7c7] bg-[#fff7f7] text-[#9c3f3f]']" role="status"><i :class="['pi mr-[.4rem]', notice.severity === 'success' ? 'pi-check-circle' : 'pi-exclamation-circle']" />{{ notice.text }}</div>
       <Message v-if="loadError" severity="error" :closable="false" class="mx-auto max-w-[1800px]">{{ loadError }}</Message>
 
       <section class="relative mx-auto max-w-[1800px] overflow-hidden rounded-b-2xl border border-[#e2e6ef] bg-white shadow-[0_12px_35px_rgba(30,41,75,.05)]">
         <div v-if="loading" class="absolute inset-0 z-10 grid place-items-center bg-white/70" role="status" aria-label="Loading schedule"><ProgressSpinner stroke-width="4" class="!h-10 !w-10" /></div>
-        <div v-if="!loading && !loadError && !visibleResources.length" class="px-6 py-16 text-center text-[#7f899b]"><i class="pi pi-users text-2xl" /><p class="mb-0">No technicians or QA users to schedule.</p></div>
+        <div v-if="!loading && !loadError && !visibleResources.length" class="px-6 py-16 text-center text-[#7f899b]"><i class="pi pi-users text-2xl" /><p class="mb-0">{{ selectedUserTypes.length ? 'No team members in the selected user types.' : 'No technicians to schedule.' }}</p></div>
         <div v-else class="overflow-x-auto">
           <div class="grid min-w-[calc(210px+var(--day-count)*180px)] [grid-template-columns:210px_repeat(var(--day-count),minmax(180px,1fr))] max-[600px]:min-w-[calc(160px+var(--day-count)*170px)] max-[600px]:[grid-template-columns:160px_repeat(var(--day-count),minmax(170px,1fr))]" :style="{ '--day-count': visibleDays.length }">
             <div class="sticky top-0 left-0 z-4 flex min-h-[68px] flex-col justify-center border-r border-b border-[#dfe4ec] bg-[#f8f9fc] px-4"><span class="text-[.76rem] font-extrabold tracking-[.04em] text-[#414b60] uppercase">Team member</span><small class="mt-[.22rem] text-[#9098a8]">{{ visibleResources.length }} resources</small></div>
@@ -515,15 +601,25 @@ onBeforeUnmount(() => window.clearInterval(refreshTimer))
             </div>
 
             <template v-for="resource in visibleResources" :key="resource.id">
-              <div class="sticky left-0 z-2 flex min-h-28 items-start gap-[.7rem] border-r border-b border-[#dfe4ec] bg-[#fbfcfe] px-[.85rem] py-4">
+              <component
+                :is="canViewUsers ? 'button' : 'div'"
+                v-bind="canViewUsers ? { type: 'button', title: `View ${resource.name}` } : {}"
+                :class="['sticky left-0 z-2 flex min-h-28 items-start gap-[.7rem] border-0 border-r border-b border-solid border-[#dfe4ec] bg-[#fbfcfe] px-[.85rem] py-4 text-left font-[inherit]', canViewUsers ? 'cursor-pointer hover:bg-[#f0f2ff]' : '']"
+                @click="canViewUsers && (openUserId = resource.id)"
+              >
                 <span class="grid h-8 w-8 shrink-0 place-items-center rounded-[.6rem] bg-[#e9ebff] text-[.68rem] font-extrabold text-[#4e58c4]">{{ resource.name.split(' ').map((part) => part[0]).slice(0, 2).join('') }}</span>
                 <div class="min-w-0"><strong class="block overflow-hidden text-[.84rem] text-ellipsis whitespace-nowrap text-[#2d374b]">{{ resource.name }}</strong><small class="mt-1 block text-[.7rem] text-[#8a93a5]">{{ resource.roles.join(' · ') || 'Team member' }}</small></div>
-              </div>
+              </component>
               <div v-for="day in visibleDays" :key="`${resource.id}-${day}`" :class="['min-h-28 border-r border-b border-[#e2e6ed] p-[.38rem] transition-colors has-[.dragging]:bg-[#f0f2ff]', isToday(day) ? 'bg-[#fafaff]' : 'bg-white']" @dragover.prevent @drop.prevent.stop="dropJob(resource.id, day)">
+                <button
+                  v-for="note in eventsFor(resource.id, day)" :key="`note-${note.id}`" type="button"
+                  class="mb-[.38rem] flex w-full items-start gap-[.4rem] rounded-[.65rem] border border-dashed border-[#c5cbe0] bg-[#f7f8fd] px-[.55rem] py-[.45rem] text-left font-[inherit] text-[.72rem] font-semibold text-[#4a5470] hover:border-[#8f99d8] hover:bg-white"
+                  :title="noteTitle(note)" @click="editEvent(note)"
+                ><i class="pi pi-comment mt-[.12rem] text-[.7rem] text-[#7a84c8]" /><span class="min-w-0 break-words">{{ note.name }}</span></button>
                 <button
                   v-for="item in jobsFor(resource.id, day)" :key="item.id"
                   :class="jobClasses(item)"
-                  :draggable="item.tone !== 'event'" :title="`${item.property}\n${item.detail}\nStatus: ${item.status}`" type="button"
+                  draggable="true" :title="`${item.property}\n${item.detail}\nStatus: ${item.status}`" type="button"
                   @dragstart="startDrag(item, $event)" @dragend="draggedJobId = null" @click="openJob(item)"
                   @dragover.prevent @drop.prevent.stop="dropJob(resource.id, day, item.id)"
                 >
@@ -538,6 +634,10 @@ onBeforeUnmount(() => window.clearInterval(refreshTimer))
         </div>
       </section>
     </main>
+
+    <Drawer :visible="openUserId !== null" header="Team member" position="right" class="!w-[min(980px,100vw)] [&_.p-drawer-content]:bg-[#f5f7fb] [&_.p-drawer-content]:!pt-5" @update:visible="closeUser">
+      <UserDetail v-if="openUserId" :key="openUserId" :user-id="openUserId" @removed="closeUser" @back="closeUser" />
+    </Drawer>
 
     <Drawer v-model:visible="queueOpen" header="Unscheduled jobs" position="right" :modal="false">
       <p class="mt-0 mb-4 leading-6 text-[#778195]">Drag a job from this queue onto a team member’s day.</p>
@@ -555,13 +655,21 @@ onBeforeUnmount(() => window.clearInterval(refreshTimer))
       <template #footer><Button label="Cancel" severity="secondary" text @click="settingsOpen = false" /><Button label="Save preferences" @click="savePreferences" /></template>
     </Dialog>
 
-    <Dialog v-model:visible="eventOpen" modal header="Add schedule note" :style="{ width: '32rem' }">
+    <Dialog v-model:visible="eventOpen" modal :header="eventId ? 'Edit schedule note' : 'Add schedule note'" :style="{ width: '32rem' }">
       <div class="grid gap-4 [&_label]:grid [&_label]:gap-[.45rem] [&_label]:text-[.8rem] [&_label]:font-bold [&_label]:text-[#3c465a] [&_.p-inputtext]:w-full [&_.p-select]:w-full [&_.p-textarea]:w-full">
-        <label>Team member<Select v-model="eventResource" :options="visibleResources" option-label="name" option-value="id" /></label>
-        <label>Day<Select v-model="eventDay" :options="visibleDays.map((day) => ({ label: `${dayName(day)} · ${formatShortDate(dateForDay(day))}`, value: day }))" option-label="label" option-value="value" /></label>
-        <label>Note<Textarea v-model="eventNote" rows="4" placeholder="Vacation, training, no more work…" /></label>
+        <label>Team member<Select v-model="eventResource" :options="visibleResources" option-label="name" option-value="id" filter /></label>
+        <div class="grid grid-cols-2 gap-4 max-[520px]:grid-cols-1">
+          <label>From<InputText v-model="eventStart" type="date" /></label>
+          <label>Through <span class="font-normal text-[#858e9f]">(optional, last day)</span><InputText v-model="eventEnd" type="date" :min="eventStart" /></label>
+        </div>
+        <label>Note<Textarea v-model="eventNote" rows="3" maxlength="128" placeholder="Vacation, training, no more work…" /></label>
+        <Message v-if="eventError" severity="error" :closable="false">{{ eventError }}</Message>
+        <p v-if="eventConfirmDelete" class="m-0 leading-6 text-[#667085]">Delete this note? It disappears from every day it covers. This can’t be undone.</p>
       </div>
-      <template #footer><Button label="Cancel" severity="secondary" text @click="eventOpen = false" /><Button label="Add note" :disabled="!eventResource || eventDay === null || !eventNote.trim()" @click="saveEvent" /></template>
+      <template #footer>
+        <template v-if="eventConfirmDelete"><Button label="Keep note" severity="secondary" text :disabled="eventSaving" @click="eventConfirmDelete = false" /><Button label="Delete note" severity="danger" :loading="eventSaving" @click="deleteEvent" /></template>
+        <template v-else><Button v-if="eventId" label="Delete" icon="pi pi-trash" severity="danger" text class="mr-auto" :disabled="eventSaving" @click="eventConfirmDelete = true" /><Button label="Cancel" severity="secondary" text :disabled="eventSaving" @click="eventOpen = false" /><Button :label="eventId ? 'Save note' : 'Add note'" :loading="eventSaving" :disabled="!eventValid" @click="saveEvent" /></template>
+      </template>
     </Dialog>
 
     <Dialog v-model:visible="jobOpen" modal header="Schedule item" :style="{ width: '32rem' }">

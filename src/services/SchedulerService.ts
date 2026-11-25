@@ -3,7 +3,7 @@ import { auth } from '../auth'
 import type { RoleEnum } from '../constants/roles'
 
 /** Shapes returned by tkt-core `GET /scheduler/weekly` (only the fields the client reads). */
-/** A tenant user type (e.g. Painter), the value of the weekly endpoint's `userType` filter. */
+/** A tenant user type (e.g. Painter), whose names are the values of the weekly endpoint's `userType` filter. */
 export interface UserType {
   id: string
   name: string
@@ -42,6 +42,26 @@ export interface ScheduleJob {
   serviceItem: ScheduleServiceItem | null
 }
 
+/** A note on a team member's row of the scheduler for a day or a run of days (`SchedulerEvent` in tkt-core). */
+export interface ScheduleEvent {
+  id: string
+  userId: string
+  name: string
+  /** First day, as a calendar date (`2026-11-25`), no time zone. */
+  startDate: string
+  /** Last day, inclusive; equal to `startDate` for a one-day note. */
+  endDate: string
+  createdBy: string | null
+}
+
+/** What `POST` and `PUT /scheduler/events` take. Leave out `endDate` for a one-day note. */
+export interface ScheduleEventBody {
+  userId: string
+  name: string
+  startDate: string
+  endDate?: string | null
+}
+
 export interface ScheduleUser {
   id: string
   email: string | null
@@ -50,6 +70,8 @@ export interface ScheduleUser {
   image: string | null
   roles: RoleEnum[] | null
   workOrderJobs: ScheduleJob[] | null
+  /** Notes touching the week; every day they cover is in `startDate`–`endDate`. */
+  schedulerEvents: ScheduleEvent[] | null
 }
 
 export interface JobMove {
@@ -80,15 +102,15 @@ class SchedulerService extends BaseApiService {
   }
 
   /**
-   * Technicians and QA users with their jobs for the 7 days starting at `weekStart`
-   * (local midnight). The browser's time zone is sent so the API computes the same week end.
+   * Technicians with their jobs for the 7 days starting at `weekStart`
+   * (local midnight). With `userTypes`, only the users in any of them, and their jobs, are included. The browser's time zone is sent so the API computes the same week end.
    */
-  async weekly(weekStart: Date, userType?: string): Promise<ScheduleUser[]> {
+  async weekly(weekStart: Date, userTypes: string[] = []): Promise<ScheduleUser[]> {
     const params = new URLSearchParams({
       startDate: String(weekStart.getTime()),
       tz: Intl.DateTimeFormat().resolvedOptions().timeZone,
     })
-    if (userType) params.set('userType', userType)
+    userTypes.forEach((userType) => params.append('userType', userType))
     const payload = await this.data<ScheduleUser[] | null>(
       await this.get(`/scheduler/weekly?${params}`),
       'Couldn’t load the schedule.',
@@ -132,6 +154,22 @@ class SchedulerService extends BaseApiService {
       'Couldn’t load unscheduled jobs.',
     )
     return Array.isArray(payload) ? payload : []
+  }
+
+  /** Adds a note to a team member's day or run of days (`POST /scheduler/events`). Requires the Admin or Super Admin role. */
+  async createEvent(body: ScheduleEventBody): Promise<ScheduleEvent> {
+    return this.data<ScheduleEvent>(await this.post('/scheduler/events', body), 'Unable to add the note.')
+  }
+
+  /** Replaces a note's team member, text and days (`PUT /scheduler/events/{id}`). Requires the Admin or Super Admin role. */
+  async updateEvent(id: string, body: ScheduleEventBody): Promise<ScheduleEvent> {
+    return this.data<ScheduleEvent>(await this.put(`/scheduler/events/${id}`, body), 'Unable to save the note.')
+  }
+
+  /** Deletes a note (`DELETE /scheduler/events/{id}`). Requires the Admin or Super Admin role. */
+  async deleteEvent(id: string): Promise<void> {
+    const response = await this.delete(`/scheduler/events/${id}`)
+    if (!response.ok) throw new Error(await this.errorMessage(response, 'Unable to delete the note.'))
   }
 
   /**

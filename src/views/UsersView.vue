@@ -14,10 +14,13 @@ import { hasAdminRole, ROLES } from '../constants/roles'
 import { userColor, userInitials, userName, userRoleNames, userStatus, type User, type UserStatus } from '../services/User'
 import { invitationService, type InvitationResult, type InvitationStatus } from '../services/InvitationService'
 import { userService } from '../services/UserService'
+import { billingService } from '../services/BillingService'
 import { formatTimestamp } from '../utils/workOrderFormat'
 
 const router = useRouter()
 const users = ref<User[]>([])
+/** The tenant's primary user (billing contact), shown as a tag in the list. */
+const primaryUserId = ref<string | null>(null)
 const archivedUsers = ref<User[] | null>(null)
 const loading = ref(true)
 const loadError = ref('')
@@ -35,6 +38,8 @@ async function load() {
   loadError.value = ''
   try {
     users.value = await userService.list()
+    // The tag is a nicety: the list still works when the primary user can't be loaded.
+    primaryUserId.value = (await billingService.primaryUser().catch(() => null))?.id ?? null
     archivedUsers.value = null
     if (showingArchived.value) archivedUsers.value = await userService.list(true)
   } catch (reason) {
@@ -152,7 +157,7 @@ function statusSeverity(status: UserStatus) {
             <thead class="bg-[#fafbfc] text-[.7rem] tracking-[.08em] text-[#7d8698] uppercase"><tr><th class="px-5 py-3.5">User</th><th class="px-4 py-3.5">Role</th><th class="px-4 py-3.5">Phone</th><th class="px-4 py-3.5">Status</th><th class="px-4 py-3.5">Last sign-in</th><th class="w-12 px-4 py-3.5" /></tr></thead>
             <tbody>
               <tr v-for="user in filteredUsers" :key="user.id" class="cursor-pointer border-t border-[#edf0f4] transition-colors hover:bg-[#f8f9fd]" @click="router.push(`/users/${user.id}`)">
-                <td class="px-5 py-4"><div class="flex items-center gap-3"><span class="grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-bold text-white" :style="{ background: userColor(user) }">{{ userInitials(user) }}</span><div><strong class="block text-sm">{{ userName(user) }}</strong><span class="mt-1 block text-xs text-[#7d8698]">{{ user.email }}</span></div></div></td>
+                <td class="px-5 py-4"><div class="flex items-center gap-3"><span class="grid h-10 w-10 shrink-0 place-items-center rounded-full text-sm font-bold text-white" :style="{ background: userColor(user) }">{{ userInitials(user) }}</span><div><strong class="block text-sm">{{ userName(user) }}<Tag v-if="user.id === primaryUserId" value="Primary user" severity="info" class="ml-2 align-middle" /></strong><span class="mt-1 block text-xs text-[#7d8698]">{{ user.email }}</span></div></div></td>
                 <td class="px-4 py-4"><strong class="text-sm font-semibold">{{ userRoleNames(user).join(', ') || '—' }}</strong></td>
                 <td class="px-4 py-4 text-sm text-[#5f687b]">{{ user.phone || user.mobile || '—' }}</td>
                 <td class="px-4 py-4"><Tag :value="userStatus(user)" :severity="statusSeverity(userStatus(user))" /></td>

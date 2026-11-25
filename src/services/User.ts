@@ -39,6 +39,9 @@ export const userColor = (user: User) => AVATAR_COLORS[[...user.id].reduce((sum,
 
 export const userRoleNames = (user: User): string[] => user.roles ?? []
 
+/** Whether the user can be a tenant's primary user: an active Admin of it (the API enforces this). */
+export const canBePrimaryUser = (user: User) => !user.archived && (user.roles ?? []).includes('Admin' as RoleEnum)
+
 /** The user's full name, or an empty string when there is no user or no name. */
 export function userName(user: User | null | undefined) {
   return [user?.firstName, user?.lastName].filter(Boolean).join(' ')
