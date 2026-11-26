@@ -42,7 +42,6 @@ export function statusClass(status: string) {
     Confirmed: 'bg-[#e8f4ff] text-[#2876ae]',
     Hold: 'bg-[#fff2d8] text-[#a76708]',
     'Go Back': 'bg-[#fff2d8] text-[#a76708]',
-    Done: 'bg-[#e2f7f1] text-[#13836e]',
     Serviced: 'bg-[#e2f7f1] text-[#13836e]',
     Reviewed: 'bg-[#e2f7f1] text-[#13836e]',
     'Ready to Bill': 'bg-[#e2f7f1] text-[#13836e]',

@@ -194,7 +194,6 @@ function dayIndex(iso: string | null): number | null {
 /** Card colour per status: blue until confirmed, green once confirmed, yellow when the work is done. */
 const STATUS_TONES: Partial<Record<string, JobTone>> = {
   [StatusEnum.CONFIRMED]: 'active',
-  [StatusEnum.DONE]: 'ready',
   [StatusEnum.SERVICED]: 'ready',
   [StatusEnum.REVIEWED]: 'ready',
   [StatusEnum.READY_TO_BILL]: 'ready',
