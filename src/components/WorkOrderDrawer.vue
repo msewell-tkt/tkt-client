@@ -12,7 +12,7 @@ import ProgressSpinner from 'primevue/progressspinner'
 import Select from 'primevue/select'
 import Textarea from 'primevue/textarea'
 import { JOB_STATUSES, StatusEnum } from '../constants/jobStatus'
-import { propertyService, type Property, type ServiceItem } from '../services/PropertyService'
+import { DuplicateServiceItemError, propertyService, type Property, type ServiceItem } from '../services/PropertyService'
 import { schedulerService } from '../services/SchedulerService'
 import { userService } from '../services/UserService'
 import { userName, type User } from '../services/User'
@@ -101,6 +101,11 @@ const noteDraft = ref('')
 const editingExtraId = ref<string | null>(null)
 const extraDraft = ref({ name: '', list: 0, cost: 0 })
 const selectedServiceItem = ref('')
+const newItemOpen = ref(false)
+const newItem = ref({ name: '', list: 0, cost: 0 })
+const newItemError = ref('')
+/** Set to warn that the property already has the item; says which. */
+const duplicateWarning = ref('')
 /** The user chosen while editing a note, additional item or attachment. */
 const entryUserId = ref<string | null>(null)
 const editingAttachmentId = ref<string | null>(null)
@@ -559,6 +564,58 @@ async function addServiceItem() {
   }, 'Unable to save the item.')
 }
 
+function openNewItem() {
+  newItem.value = { name: '', list: 0, cost: 0 }
+  newItemError.value = ''
+  duplicateWarning.value = ''
+  newItemOpen.value = true
+}
+
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase()
+
+function duplicateMessage(existing: ServiceItem) {
+  return existing.extra
+    ? `“${existing.name}” already exists for this property. Choose it from the list to add it to the job.`
+    : `“${existing.name}” already exists for this property as a job type, so it isn’t offered as an additional item.`
+}
+
+/** Adds a service item to the property, unless it already has one by that name, and puts it on the job. */
+async function createServiceItem() {
+  const order = editing.value
+  const job = activeJob.value
+  const propertyId = order?.property?.id
+  const name = newItem.value.name.trim()
+  if (!order || !job?.saved || !propertyId || !name || entryBusy.value) return
+  entryBusy.value = true
+  newItemError.value = ''
+  saveError.value = ''
+  try {
+    // look at the property's current items: someone may have added this one since the drawer opened
+    const items = await propertyService.serviceItems(propertyId)
+    serviceItemsByProperty.value[propertyId] = items
+    const existing = items.find((item) => sameName(item.name, name))
+    if (existing) {
+      duplicateWarning.value = duplicateMessage(existing)
+      return
+    }
+    const created = await propertyService.saveServiceItem(propertyId, { id: null, name, list: newItem.value.list ?? 0, cost: newItem.value.cost ?? 0, extra: true })
+    serviceItemsByProperty.value[propertyId] = [...items, created].sort((a, b) => a.name.localeCompare(b.name))
+    newItemOpen.value = false
+    try {
+      job.extras.unshift(await workOrderService.saveExtra(order.id, job.id, { name: created.name, list: created.list, cost: created.cost }))
+    } catch (reason) {
+      // the property has the item now; leave it selected so "Add item" retries the job
+      selectedServiceItem.value = created.id ?? ''
+      saveError.value = `“${created.name}” was added to the property, but not to this job. ${reason instanceof Error ? reason.message : ''}`.trim()
+    }
+  } catch (reason) {
+    if (reason instanceof DuplicateServiceItemError) duplicateWarning.value = reason.message
+    else newItemError.value = reason instanceof Error ? reason.message : 'Unable to add the service item.'
+  } finally {
+    entryBusy.value = false
+  }
+}
+
 function startExtraEdit(extra: JobExtra) {
   editingExtraId.value = extra.id
   entryUserId.value = extra.user?.id ?? null
@@ -677,7 +734,7 @@ async function removeAttachment(id: string) {
               </div>
   
               <div v-else-if="activeJobSection === 'items'">
-                <div class="mb-5 flex gap-3 rounded-2xl border border-[#e1e5ed] bg-[#fafbfc] p-4 max-[560px]:flex-col"><Select v-model="selectedServiceItem" :options="extraOptions" option-label="name" option-value="id" class="min-w-0 flex-1" :disabled="!activeJob.saved" :placeholder="extraOptions.length ? 'Select a service item' : 'No additional items for this property'" filter /><Button type="button" icon="pi pi-plus" label="Add item" :disabled="!activeJob.saved || !selectedServiceItem" :loading="entryBusy" @click="addServiceItem" /></div>
+                <div class="mb-5 flex gap-3 rounded-2xl border border-[#e1e5ed] bg-[#fafbfc] p-4 max-[560px]:flex-col"><Select v-model="selectedServiceItem" :options="extraOptions" option-label="name" option-value="id" class="min-w-0 flex-1" :disabled="!activeJob.saved" :placeholder="extraOptions.length ? 'Select a service item' : 'No additional items for this property'" filter /><Button type="button" icon="pi pi-plus" label="Add item" :disabled="!activeJob.saved || !selectedServiceItem" :loading="entryBusy" @click="addServiceItem" /><Button type="button" icon="pi pi-plus-circle" label="New service item" severity="secondary" outlined :disabled="!activeJob.saved || !editing.property || entryBusy" @click="openNewItem" /></div>
                 <div class="overflow-hidden rounded-xl border border-[#e2e6ed]"><div class="grid grid-cols-[1fr_80px_180px_44px] gap-3 border-b border-[#e7eaf0] bg-[#fafbfc] px-4 py-3 text-[.68rem] font-extrabold tracking-[.08em] text-[#80899a] uppercase max-[620px]:hidden"><span>Service item</span><span>List</span><span>Added by</span><span></span></div><template v-for="item in activeJob.extras" :key="item.id"><div v-if="editingExtraId === item.id" class="grid grid-cols-[1fr_130px_130px_auto] items-center gap-3 border-b border-[#edf0f4] bg-[#fafbfc] px-4 py-4 last:border-0 max-[620px]:grid-cols-2"><InputText v-model="extraDraft.name" aria-label="Item name" class="max-[620px]:col-span-2" /><InputNumber v-model="extraDraft.list" mode="currency" currency="USD" locale="en-US" :min="0" aria-label="List price" /><InputNumber v-model="extraDraft.cost" mode="currency" currency="USD" locale="en-US" :min="0" aria-label="Cost" /><span class="flex justify-end gap-2 max-[620px]:col-span-2"><Button type="button" label="Cancel" severity="secondary" text size="small" @click="editingExtraId = null" /><Button type="button" icon="pi pi-check" label="Save" size="small" :disabled="!extraDraft.name.trim()" :loading="entryBusy" @click="saveExtraEdit(item)" /></span><Select v-model="entryUserId" :options="entryUserOptions(item.user)" :option-label="authorName" option-value="id" filter placeholder="Added by" aria-label="Added by" class="col-span-full" /></div><div v-else class="grid grid-cols-[1fr_80px_180px_44px] items-center gap-3 border-b border-[#edf0f4] px-4 py-4 last:border-0 max-[620px]:grid-cols-[1fr_auto]"><strong class="text-sm">{{ item.name }}</strong><span class="text-sm text-[#596276] max-[620px]:hidden">{{ money(item.list ?? 0) }}</span><span class="max-[620px]:col-start-1"><span class="block text-xs font-semibold text-[#596276]">{{ authorName(item.user) }}</span><time class="mt-1 block text-[.7rem] text-[#8a93a4]">{{ formatTimestamp(item.created) }}</time></span><span class="flex"><Button type="button" icon="pi pi-pencil" text rounded size="small" aria-label="Edit item" :disabled="entryBusy" @click="startExtraEdit(item)" /><Button type="button" icon="pi pi-trash" severity="danger" text rounded size="small" aria-label="Remove item" :disabled="entryBusy" @click="removeServiceItem(item.id)" /></span></div></template></div>
               </div>
   
@@ -695,6 +752,23 @@ async function removeAttachment(id: string) {
             <div class="mt-8 flex items-center justify-end gap-3 border-t border-[#e8ebf1] pt-5"><span v-if="saved" class="mr-auto text-xs font-bold text-[#138c74]"><i class="pi pi-check-circle mr-1" /> Saved</span><Button v-if="!isNew(editing.id)" type="button" icon="pi pi-trash" label="Delete" severity="danger" text :disabled="saving || detailLoading" @click="deleteOpen = true" /><Button type="button" label="Cancel" severity="secondary" text @click="visible = false" /><Button type="submit" icon="pi pi-check" :label="isNew(editing.id) ? 'Create work order' : 'Save work order'" :loading="saving" :disabled="detailLoading || !editing.property" /></div>
           </form>
         </template>
+
+    <Dialog v-model:visible="newItemOpen" modal header="New service item" :style="{ width: '30rem', maxWidth: 'calc(100vw - 2rem)' }">
+      <p class="mt-0 mb-4 text-sm leading-6 text-[#667085]">Adds an additional item to <strong>{{ editing?.property?.name }}</strong> and puts it on this job.</p>
+      <form class="grid grid-cols-2 gap-4 max-[520px]:grid-cols-1" @submit.prevent="createServiceItem">
+        <label class="col-span-full grid gap-1 text-sm font-semibold">Name<InputText v-model="newItem.name" maxlength="128" autocomplete="off" autofocus /></label>
+        <label class="grid gap-1 text-sm font-semibold">List price<InputNumber v-model="newItem.list" mode="currency" currency="USD" locale="en-US" :min="0" /></label>
+        <label class="grid gap-1 text-sm font-semibold">Cost<InputNumber v-model="newItem.cost" mode="currency" currency="USD" locale="en-US" :min="0" /></label>
+        <button type="submit" class="hidden" tabindex="-1" aria-hidden="true" />
+      </form>
+      <Message v-if="newItemError" severity="error" :closable="false" class="mt-4">{{ newItemError }}</Message>
+      <template #footer><Button label="Cancel" severity="secondary" text :disabled="entryBusy" @click="newItemOpen = false" /><Button label="Add service item" icon="pi pi-plus" :loading="entryBusy" :disabled="!newItem.name.trim()" @click="createServiceItem" /></template>
+    </Dialog>
+
+    <Dialog :visible="duplicateWarning !== ''" modal header="Item already exists" :style="{ width: '28rem', maxWidth: 'calc(100vw - 2rem)' }" @update:visible="duplicateWarning = ''">
+      <div class="flex gap-3"><i class="pi pi-exclamation-triangle mt-1 text-xl text-[#bb7914]" /><p class="m-0 leading-6 text-[#667085]">{{ duplicateWarning }}</p></div>
+      <template #footer><Button label="OK" @click="duplicateWarning = ''" /></template>
+    </Dialog>
 
     <Dialog v-model:visible="cancelJobOpen" modal header="Cancel job?" :style="{ width: '28rem' }">
       <p class="mt-0 leading-6 text-[#667085]"><strong>{{ activeJob ? jobName(activeJob) : '' }}</strong> will be marked Canceled. It stays on the work order and in its status history, but leaves the unscheduled queue and the technician’s open jobs.</p>

@@ -18,6 +18,9 @@ export interface ServiceItem {
   extra: boolean
 }
 
+/** The property already has a service item with that name. */
+export class DuplicateServiceItemError extends Error {}
+
 /** A property resource; today the client uses these as image URLs. */
 export interface PropertyResource {
   id: string | null
@@ -89,11 +92,11 @@ class PropertyService extends BaseApiService {
     return this.fetchList(`/properties/${propertyId}/service-items`, 'Couldn’t load service items.')
   }
 
+  /** Creates or updates a service item. Throws {@link DuplicateServiceItemError} when the property has the name. */
   async saveServiceItem(propertyId: string, item: ServiceItem): Promise<ServiceItem> {
-    return this.data<ServiceItem>(
-      await this.post(`/properties/${propertyId}/service-items`, item),
-      'Unable to save the service item.',
-    )
+    const response = await this.post(`/properties/${propertyId}/service-items`, item)
+    if (response.status === 409) throw new DuplicateServiceItemError(await this.errorMessage(response, 'This service item already exists for this property.'))
+    return this.data<ServiceItem>(response, 'Unable to save the service item.')
   }
 
   async resources(propertyId: string): Promise<PropertyResource[]> {
