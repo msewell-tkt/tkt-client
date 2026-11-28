@@ -12,6 +12,7 @@ import { propertyService, type Property } from '../services/PropertyService'
 import { workOrderService, type WorkOrder } from '../services/WorkOrderService'
 import { userName } from '../services/User'
 import { formatDate, jobCount, openJobCount, statusClass } from '../utils/workOrderFormat'
+import { orderRequest } from '../services/inboxNavigation'
 
 const query = ref('')
 const ALL_STATUSES = 'All'
@@ -68,6 +69,12 @@ onMounted(() => {
 // Once closed, a reload shouldn't reopen the linked work order.
 watch(drawerOpen, (open) => {
   if (!open && route.query.order) void router.replace({ query: { ...route.query, order: undefined } })
+})
+/** The inbox asks to see a work order. One that is already open stays, so unsaved edits aren't lost. */
+watch(orderRequest, (request) => {
+  if (!request || drawerOpen.value) return
+  editingId.value = request.id
+  drawerOpen.value = true
 })
 watch([statusFilter, propertyFilter], () => void loadOrders())
 watch(query, () => {

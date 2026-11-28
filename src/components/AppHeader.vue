@@ -43,6 +43,8 @@
     />
     <Message v-if="switchError" severity="error" closable class="absolute top-[76px] right-4" @close="switchError = ''">{{ switchError }}</Message>
 
+    <InboxBell v-if="inbox" />
+
     <Button
       icon="pi pi-sign-out"
       label="Sign out"
@@ -65,6 +67,7 @@ import { auth, type TenantOption } from '../auth'
 import { RoleEnum } from '../constants/roles'
 import { tenantSwitchService } from '../services/TenantSwitchService'
 import { loadSession } from '../session'
+import InboxBell from './InboxBell.vue'
 import TenantLogo from './TenantLogo.vue'
 
 const links = [
@@ -76,12 +79,15 @@ const links = [
 ]
 
 const superAdmin = ref(false)
+/** The inbox of field events is for the office: Admin, Super Admin and Dispatcher. */
+const inbox = ref(false)
 const tenantId = ref('')
 const tenantName = ref('')
 onMounted(async () => {
   try {
     const session = await loadSession()
     superAdmin.value = session.roles.includes(RoleEnum.SUPER_ADMIN)
+    inbox.value = session.roles.some((role) => role === RoleEnum.ADMIN || role === RoleEnum.SUPER_ADMIN || role === RoleEnum.DISPATCHER)
     tenantId.value = session.tid
     tenantName.value = session.tenantName
   } catch {

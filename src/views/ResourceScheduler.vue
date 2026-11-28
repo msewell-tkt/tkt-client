@@ -17,6 +17,7 @@ import WorkOrderDrawer from '../components/WorkOrderDrawer.vue'
 import { INITIAL_STATUS, StatusEnum } from '../constants/jobStatus'
 import { RoleEnum } from '../constants/roles'
 import { loadSession } from '../session'
+import { orderRequest } from '../services/inboxNavigation'
 import { schedulerService, type ScheduleEvent, type ScheduleJob, type ScheduleUser } from '../services/SchedulerService'
 
 type JobTone = 'scheduled' | 'active' | 'ready'
@@ -411,6 +412,14 @@ function editWorkOrder() {
   jobOpen.value = false
   orderOpen.value = true
 }
+
+/** The inbox asks to see a work order. One that is already open stays, so unsaved edits aren't lost. */
+watch(orderRequest, (request) => {
+  if (!request || orderOpen.value) return
+  orderId.value = request.id
+  jobOpen.value = false
+  orderOpen.value = true
+})
 
 /** Jobs of a new or edited work order show up in the unscheduled queue (or move on the grid), so reload. */
 function onOrderSaved() {

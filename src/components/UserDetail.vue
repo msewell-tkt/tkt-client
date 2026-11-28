@@ -16,6 +16,7 @@ import { dashboardService } from '../services/DashboardService'
 import { tenantService, type TenantSummary } from '../services/TenantService'
 import { userService, type UserProperty, type UserType } from '../services/UserService'
 import { formatTimestamp } from '../utils/workOrderFormat'
+import MessagesPanel from './MessagesPanel.vue'
 
 /** One user of the workspace and everything an admin can change about them. Give it a `key` to switch users. */
 const props = defineProps<{ userId: string }>()
@@ -80,6 +81,9 @@ async function change(action: () => Promise<void>, fallback: string) {
     busy.value = false
   }
 }
+
+/** Messages go to the people who use the apps: everyone with a role (a Property Manager sees their property’s jobs there). */
+const messagesApply = computed(() => (user.value?.roles ?? []).length > 0)
 
 const userRoles = computed({
   get: () => user.value?.roles ?? [],
@@ -270,6 +274,8 @@ function statusSeverity(value: UserStatus) {
             <div class="mb-4"><h2 class="m-0 text-lg tracking-[-.02em]">Properties</h2><p class="mt-1 mb-0 text-sm text-[#7d8698]">The properties this user is linked to.</p></div>
             <MultiSelect v-model="propertyIds" :options="allProperties" option-label="name" option-value="id" display="chip" filter placeholder="No properties" class="w-full" :disabled="busy" />
           </section>
+
+          <MessagesPanel v-if="messagesApply" :key="user.id" :user="user" />
 
           <Message v-if="actionError" severity="error" :closable="false">{{ actionError }}</Message>
         </div>

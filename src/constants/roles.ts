@@ -4,7 +4,7 @@ export enum RoleEnum {
   SUPER_ADMIN = 'Super Admin',
   QA = 'QA',
   DISPATCHER = 'Dispatcher',
-  PROPERTY = 'Property',
+  PROPERTY_MANAGER = 'Property Manager',
   TECHNICIAN = 'Technician',
 }
 
